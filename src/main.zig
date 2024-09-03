@@ -55,23 +55,32 @@ const Terminal = struct {
     fn deinitRawMode(edi: *const Editor) void {
         _ = linux.tcsetattr(STDIN_FILENO, TCSAFLUSH, &edi.orig_termios);
     }
-
-    /// wait for one keypress, and return it.
-    fn readKey() !u8 {
-        var buff: [1]u8 = .{'0'};
-        // while (0 != try stdin.read(&buff)) {}
-        _ = try stdin.read(&buff);
-        return buff[0];
-    }
 };
 
 /// deals with low-level terminal input and mapping
 const Editor = struct {
     const VERSION = "0.0.1";
     const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
-    const CTRL_Z = Editor.controlKey('z');
+    const CTRL_Z = controlKey('z');
 
+    const Key = enum(usize) {
+        ARROW_LEFT = 1000,
+        ARROW_RIGHT,
+        ARROW_UP,
+        ARROW_DOWN,
+        HOME,
+        END,
+        PAGE_UP,
+        PAGE_DOWN,
+    };
+
+    /// cursor coordinate x (horizontal)
+    cx: usize = 0,
+    /// cursor coordinate y (vertical)
+    cy: usize = 0,
+    /// screen rows
     screenrows: usize = 0,
+    /// screen columns
     screencols: usize = 0,
     /// this little guy will hold the initial state
     orig_termios: linux.termios,
@@ -93,21 +102,34 @@ const Editor = struct {
     }
 
     /// handles the keypress
-    fn processKey(_: *const Editor) !bool {
-        const char = try Terminal.readKey();
-        switch (char) {
+    fn processKeyPressed(edi: *Editor) !bool {
+        const key = try Editor.readKey();
+        switch (key) {
             CTRL_Z => {
                 _ = try stdout.write("\x1b[2J");
                 _ = try stdout.write("\x1b[H");
                 return true;
             },
-            else => {
-                return false;
+            // cursor movement keys
+            @intFromEnum(Key.ARROW_UP),
+            @intFromEnum(Key.ARROW_DOWN),
+            @intFromEnum(Key.ARROW_RIGHT),
+            @intFromEnum(Key.ARROW_LEFT),
+            => edi.moveCursor(key),
+            @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => {
+                var times = edi.screenrows;
+                const k: Key = if (key == @intFromEnum(Key.PAGE_UP)) .ARROW_UP else .ARROW_DOWN;
+                while (times != 0) : (times -= 1) edi.moveCursor(@intFromEnum(k));
             },
+            @intFromEnum(Key.HOME) => edi.cx = 0,
+            @intFromEnum(Key.END) => edi.cx = edi.screencols - 1,
+            else => {},
         }
+
+        return false;
     }
 
-    fn controlKey(c: u8) u8 {
+    fn controlKey(c: usize) usize {
         return c & 0x1f;
     }
 
@@ -128,8 +150,10 @@ const Editor = struct {
         try edi.getWindowSize();
         try edi.drawRows();
 
-        // cursor to the top-left
-        try edi.buffer.appendSlice("\x1b[H");
+        // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
+        // move the cursor
+        try edi.buffer.writer().print("\x1b[{};{}H", .{ edi.cy + 1, edi.cx + 1 });
+
         // show the cursor
         try edi.buffer.appendSlice("\x1b[?25h");
         _ = try stdout.write(edi.buffer.items);
@@ -140,27 +164,41 @@ const Editor = struct {
         var ws: std.posix.winsize = undefined;
         const errno = linux.ioctl(STDIN_FILENO, linux.T.IOCGWINSZ, @intFromPtr(&ws));
         if (errno == -1 or ws.col == 0) {
-            // if (12 != try stdout.write("\x1b[999C\x1b[999B")) return error.CannotFindWindowSize;
-            // _ = try Terminal.readKey();
             return error.CannotFindWindowSize;
         }
         edi.screenrows = ws.row;
         edi.screencols = ws.col;
     }
 
-    // fn getCursorPosition(edi: *Editor) !void {
-    //     _ = edi; // autofix
-    //     if (4 != try stdout.write("\x1b[6n")) return error.CannotFindCursorPosition;
-    //
-    //     std.debug.print("\r\n", .{});
-    //
-    //     var buff: [1]u8 = .{'0'};
-    //     while (1 == try stdin.read(&buff)) {
-    //         const c = buff[0];
-    //         if (ascii.isPrint(c));
-    //
-    //     }
-    // }
+    /// h: LEGT
+    /// k: UP
+    /// j: DOWN
+    /// l: RIGHT
+    fn moveCursor(edi: *Editor, key: usize) void {
+        const currx = edi.cx;
+        const curry = edi.cy;
+        const maxx = edi.screencols;
+        const maxy = edi.screenrows;
+
+        switch (key) {
+            @intFromEnum(Key.ARROW_LEFT) => if (currx != 0) {
+                edi.cx -= 1;
+            },
+
+            @intFromEnum(Key.ARROW_UP) => if (curry != 0) {
+                edi.cy -= 1;
+            },
+
+            @intFromEnum(Key.ARROW_DOWN) => if (curry != maxy - 1) {
+                edi.cy += 1;
+            },
+
+            @intFromEnum(Key.ARROW_RIGHT) => if (currx != maxx - 1) {
+                edi.cx += 1;
+            },
+            else => {},
+        }
+    }
 
     /// draw a column of (~) on the left hand side at the beginning of any line til EOF
     /// TODO: Clear lines one at a time
@@ -193,6 +231,71 @@ const Editor = struct {
             }
         }
     }
+
+    /// wait for one keypress, and return it.
+    fn readKey() !usize {
+        var buff: [1]u8 = .{'0'};
+        _ = try stdin.read(&buff);
+        const key = buff[0];
+
+        if (key != '\x1b') {
+            return key;
+        }
+
+        // handle escape sequence
+        var seq: [3]u8 = blk: {
+            var s0: [1]u8 = .{0};
+            if (try stdin.read(&s0) != 1) return '\x1b';
+
+            var s1: [1]u8 = .{0};
+            if (try stdin.read(&s1) != 1) return '\x1b';
+
+            break :blk .{ s0[0], s1[0], 0 };
+        };
+
+        // NOT PAGE_{UP, DOWN} or ARROW_{UP, DOWN, ...}
+        if (seq[0] == '[') {
+            // PAGE_UP AND DOWN
+            // page Up is sent as <esc>[5~ and Page Down is sent as <esc>[6~.
+            if (seq[1] >= '0' and seq[1] <= '9') {
+                seq[2] = blk: {
+                    var s2: [1]u8 = .{0};
+                    if (try stdin.read(&s2) != 1) return '\x1b';
+                    break :blk s2[0];
+                };
+
+                if (seq[2] == '~') switch (seq[1]) {
+                    '1', '7' => return @intFromEnum(Key.HOME),
+                    '4', '8' => return @intFromEnum(Key.END),
+                    '5' => return @intFromEnum(Key.PAGE_UP),
+                    '6' => return @intFromEnum(Key.PAGE_DOWN),
+                    else => {},
+                };
+            }
+
+            // ARROW KEYS
+            // '\x1b' + '[' + ('A', 'B', 'C', or 'D')
+            switch (seq[1]) {
+                '1', '7' => return @intFromEnum(Key.HOME),
+                '4', '8' => return @intFromEnum(Key.END),
+                'A' => return @intFromEnum(Key.ARROW_UP),
+                'B' => return @intFromEnum(Key.ARROW_DOWN),
+                'C' => return @intFromEnum(Key.ARROW_RIGHT),
+                'D' => return @intFromEnum(Key.ARROW_LEFT),
+                'H' => return @intFromEnum(Key.HOME),
+                'F' => return @intFromEnum(Key.END),
+                else => {},
+            }
+        }
+
+        if (seq[0] == '0') switch (seq[1]) {
+            'H' => return @intFromEnum(Key.HOME),
+            'F' => return @intFromEnum(Key.END),
+            else => {},
+        };
+
+        return '\x1b';
+    }
 };
 
 // SOME default keymaps:
@@ -215,7 +318,7 @@ pub fn main() !void {
 
     while (true) {
         try edi.refreshScreen();
-        if (try edi.processKey()) break;
+        if (try edi.processKeyPressed()) break;
     }
 }
 

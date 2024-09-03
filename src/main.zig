@@ -73,16 +73,21 @@ const Editor = struct {
     screencols: usize = 0,
     /// this little guy will hold the initial state
     orig_termios: linux.termios,
+    buffer: std.ArrayList(u8),
 
     /// Read the current terminal attributes into raw
     /// and save the terminal state
-    fn init() !Editor {
+    fn init(alloc: std.mem.Allocator) !Editor {
         var orig_termios: linux.termios = undefined;
         const errno = linux.tcgetattr(STDIN_FILENO, &orig_termios);
         if (errno == -1) return error.CannotReadTheCurrentTerminalAttributes;
-        var edi: Editor = .{ .orig_termios = orig_termios };
+        var edi: Editor = .{ .orig_termios = orig_termios, .buffer = .init(alloc) };
         try edi.getWindowSize();
         return edi;
+    }
+
+    fn deinit(edi: *Editor) void {
+        edi.buffer.deinit();
     }
 
     /// handles the keypress
@@ -107,21 +112,24 @@ const Editor = struct {
 
     // see ncurses library for terminal capabilities
     fn refreshScreen(edi: *Editor) !void {
+        defer edi.buffer.clearAndFree();
         // 4 bytes
         // byte 1: \x1b Escape character (27 in decimal)
         // Escape sequence: \x1b[
         //  allow the terminal to do text formatting task (colour, moving, clearing)
         // https://vt100.net/docs/vt100-ug/chapter3.html#ED
-        _ = try stdout.write("\x1b[2J");
+        try edi.buffer.appendSlice("\x1b[2J");
         // reposition the cursor at the top-left corner
         // H command (Cursor Position)
-        _ = try stdout.write("\x1b[H");
+        try edi.buffer.appendSlice("\x1b[H");
 
         // new line tildes
         try edi.getWindowSize();
         try edi.drawRows();
 
-        _ = try stdout.write("\x1b[H");
+        try edi.buffer.appendSlice("\x1b[H");
+
+        _ = try stdout.write(edi.buffer.items);
     }
 
     fn getWindowSize(edi: *Editor) !void {
@@ -133,10 +141,11 @@ const Editor = struct {
     }
 
     /// draw a column of (~) on the left hand side at the beginning of any line til EOF
-    fn drawRows(edi: *const Editor) !void {
-        for (0..edi.screenrows) |_| {
-            _ = try stdout.write("~\r\n");
+    fn drawRows(edi: *Editor) !void {
+        for (0..edi.screenrows - 1) |_| {
+            try edi.buffer.appendSlice("~\r\n");
         }
+        _ = try edi.buffer.append('~');
     }
 };
 
@@ -147,7 +156,12 @@ const Editor = struct {
 //ctrl-s:stop sending output
 //ctrl-q:resume
 pub fn main() !void {
-    var edi: Editor = try .init();
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    const alloc = gpa.allocator();
+    defer if (gpa.deinit() == .leak) @panic("LEAK");
+
+    var edi: Editor = try .init(alloc);
+    defer edi.deinit();
 
     // starts the editor layout
     try Terminal.initRawMode(&edi);

@@ -67,6 +67,8 @@ const Terminal = struct {
 
 /// deals with low-level terminal input and mapping
 const Editor = struct {
+    const VERSION = "0.0.1";
+    const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
     const CTRL_Z = Editor.controlKey('z');
 
     screenrows: usize = 0,
@@ -100,7 +102,6 @@ const Editor = struct {
                 return true;
             },
             else => {
-                std.debug.print("{c}", .{char});
                 return false;
             },
         }
@@ -110,42 +111,87 @@ const Editor = struct {
         return c & 0x1f;
     }
 
-    // see ncurses library for terminal capabilities
+    /// see ncurses library for terminal capabilities
+    /// Escape sequence (1byte): \x1b[ allow the terminal to do text formatting task (colour, moving, clearing)
+    /// https://vt100.net/docs/vt100-ug/chapter3.html#ED
     fn refreshScreen(edi: *Editor) !void {
         defer edi.buffer.clearAndFree();
-        // 4 bytes
-        // byte 1: \x1b Escape character (27 in decimal)
-        // Escape sequence: \x1b[
-        //  allow the terminal to do text formatting task (colour, moving, clearing)
-        // https://vt100.net/docs/vt100-ug/chapter3.html#ED
-        try edi.buffer.appendSlice("\x1b[2J");
-        // reposition the cursor at the top-left corner
-        // H command (Cursor Position)
+
+        // hide the cursor
+        try edi.buffer.appendSlice("\x1b[?25l");
+        // clear all [2J:
+        // try edi.buffer.appendSlice("\x1b[2J"); // let's use \x1b[K instead
+        // reposition the cursor at the top-left corner; H command (Cursor Position)
         try edi.buffer.appendSlice("\x1b[H");
 
-        // new line tildes
+        // new line tildes (~)
         try edi.getWindowSize();
         try edi.drawRows();
 
+        // cursor to the top-left
         try edi.buffer.appendSlice("\x1b[H");
-
+        // show the cursor
+        try edi.buffer.appendSlice("\x1b[?25h");
         _ = try stdout.write(edi.buffer.items);
     }
 
+    /// TODO: Window size, the hard way
     fn getWindowSize(edi: *Editor) !void {
         var ws: std.posix.winsize = undefined;
         const errno = linux.ioctl(STDIN_FILENO, linux.T.IOCGWINSZ, @intFromPtr(&ws));
-        if (errno == -1 or ws.col == 0) return error.CannotFindWindowSize;
+        if (errno == -1 or ws.col == 0) {
+            // if (12 != try stdout.write("\x1b[999C\x1b[999B")) return error.CannotFindWindowSize;
+            // _ = try Terminal.readKey();
+            return error.CannotFindWindowSize;
+        }
         edi.screenrows = ws.row;
         edi.screencols = ws.col;
     }
 
+    // fn getCursorPosition(edi: *Editor) !void {
+    //     _ = edi; // autofix
+    //     if (4 != try stdout.write("\x1b[6n")) return error.CannotFindCursorPosition;
+    //
+    //     std.debug.print("\r\n", .{});
+    //
+    //     var buff: [1]u8 = .{'0'};
+    //     while (1 == try stdin.read(&buff)) {
+    //         const c = buff[0];
+    //         if (ascii.isPrint(c));
+    //
+    //     }
+    // }
+
     /// draw a column of (~) on the left hand side at the beginning of any line til EOF
+    /// TODO: Clear lines one at a time
     fn drawRows(edi: *Editor) !void {
-        for (0..edi.screenrows - 1) |_| {
-            try edi.buffer.appendSlice("~\r\n");
+        for (0..edi.screenrows) |y| {
+            // prints the WELLCOME_STRING
+            if (y == edi.screenrows / 3) {
+                // BUG: tiny terminals: will it fit?
+                const welllen = WELLCOME_STRING.len;
+                var pedding = (edi.screencols - welllen) / 2;
+
+                if (pedding > 0) {
+                    try edi.buffer.append('~');
+                    pedding -= 1;
+                }
+
+                while (pedding != 0) : (pedding -= 1) {
+                    try edi.buffer.append(' ');
+                }
+
+                try edi.buffer.appendSlice(WELLCOME_STRING);
+            } else {
+                try edi.buffer.append('~');
+            }
+
+            // clear each line as we redraw them
+            try edi.buffer.appendSlice("\x1b[K");
+            if (y < edi.screenrows - 1) {
+                _ = try edi.buffer.appendSlice("\r\n");
+            }
         }
-        _ = try edi.buffer.append('~');
     }
 };
 

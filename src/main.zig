@@ -5,19 +5,25 @@ const stdin = std.io.getStdIn();
 
 const RawMode = struct {
     /// do not modify this field
-    orig_termios: linux.termios,
+    prev_termios: linux.termios,
+    /// this little guy will hold the initial state
+    curr_termios: linux.termios,
 
     const STDIN_FILENO = linux.STDIN_FILENO;
-    // this control when to apply the terminal changes
+    /// this control when to apply the terminal changes
     const TCSAFLUSH = linux.TCSA.FLUSH;
 
     /// changes the terminal attribute
     fn init() RawMode {
-        var orig_termios: linux.termios = undefined;
+        var curr_termios: linux.termios = undefined;
         // this will read the current terminal attributes into raw
-        _ = linux.tcgetattr(STDIN_FILENO, &orig_termios);
+        _ = linux.tcgetattr(STDIN_FILENO, &curr_termios);
+
+        // let's save the terminal state
+        const prev_termios = curr_termios;
+
         // change the current config:
-        orig_termios.lflag = .{
+        curr_termios.lflag = .{
             // The ECHO causes each key to be printed (wee turn it of)
             .ECHO = false,
             // ICANON turn canonical off
@@ -28,10 +34,10 @@ const RawMode = struct {
             // Disable Ctrl-V
             .IEXTEN = false,
         };
-        orig_termios.iflag = .{
+        curr_termios.iflag = .{
             // stops data from being transmitted ctrl-s until ctrl-q
             .IXON = false,
-            // stops transformin \r into \n, also allow ctrl-M
+            // stops transforming \r into \n, also allow ctrl-M
             .ICRNL = false,
             // NAO SEI
             .INPCK = false,
@@ -39,24 +45,23 @@ const RawMode = struct {
             .ISTRIP = false,
         };
         // \n = \r\n
-        orig_termios.oflag = .{ .OPOST = false };
-        orig_termios.cflag = .{ .CSIZE = .CS8 };
+        curr_termios.oflag = .{ .OPOST = false };
+        curr_termios.cflag = .{ .CSIZE = .CS8 };
 
         // cc: control character
         // read will return sun as possible (0 bytes)
-        orig_termios.cc[@intFromEnum(linux.V.MIN)] = 0;
+        curr_termios.cc[@intFromEnum(linux.V.MIN)] = 0;
         // 1 millisecond: time before read returns
-        orig_termios.cc[@intFromEnum(linux.V.TIME)] = 1;
+        curr_termios.cc[@intFromEnum(linux.V.TIME)] = 1;
 
         //the write the new custom terminal attribute
-        _ = linux.tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+        _ = linux.tcsetattr(STDIN_FILENO, TCSAFLUSH, &curr_termios);
 
-        return .{ .orig_termios = orig_termios };
+        return .{ .curr_termios = curr_termios, .prev_termios = prev_termios };
     }
 
     fn deinit(self: *RawMode) void {
-        self.orig_termios.lflag = .{ .ECHO = !false };
-        _ = linux.tcsetattr(STDIN_FILENO, TCSAFLUSH, &self.orig_termios);
+        _ = linux.tcsetattr(STDIN_FILENO, TCSAFLUSH, &self.prev_termios);
     }
 };
 

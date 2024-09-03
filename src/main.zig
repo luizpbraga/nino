@@ -68,6 +68,7 @@ const Editor = struct {
         ARROW_RIGHT,
         ARROW_UP,
         ARROW_DOWN,
+        DEL,
         HOME,
         END,
         PAGE_UP,
@@ -123,6 +124,7 @@ const Editor = struct {
             },
             @intFromEnum(Key.HOME) => edi.cx = 0,
             @intFromEnum(Key.END) => edi.cx = edi.screencols - 1,
+            // @intFromEnum(Key.DEL) => edi.cx -= 1,
             else => {},
         }
 
@@ -267,6 +269,7 @@ const Editor = struct {
                 if (seq[2] == '~') switch (seq[1]) {
                     '1', '7' => return @intFromEnum(Key.HOME),
                     '4', '8' => return @intFromEnum(Key.END),
+                    '3' => return @intFromEnum(Key.DEL),
                     '5' => return @intFromEnum(Key.PAGE_UP),
                     '6' => return @intFromEnum(Key.PAGE_DOWN),
                     else => {},

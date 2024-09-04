@@ -3,7 +3,6 @@ const linux = std.os.linux;
 const ascii = std.ascii;
 const stdin = std.io.getStdIn();
 const stdout = std.io.getStdOut();
-const reader = stdin.reader();
 
 /// deals with low-level terminal input and mapping
 const Editor = @This();
@@ -38,7 +37,9 @@ buffer: std.ArrayList(u8),
 /// numbers of activated rows
 numrows: usize = 0,
 /// rows data
-row: std.ArrayList(u8),
+rows: std.ArrayList([]u8),
+/// allocator: common to rows and buffer
+alloc: std.mem.Allocator,
 /// Read the current terminal attributes into raw
 /// and save the terminal state
 pub fn init(alloc: std.mem.Allocator) !Editor {
@@ -49,25 +50,31 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
     }
 
     var edi: Editor = .{
-        .orig_termios = orig_termios,
+        .alloc = alloc,
+        .rows = .init(alloc),
         .buffer = .init(alloc),
-        .row = .init(alloc),
+        .orig_termios = orig_termios,
     };
 
     try edi.getWindowSize();
     return edi;
 }
 
+/// read the file rows
 pub fn open(e: *Editor, file_name: []const u8) !void {
     var file = std.fs.cwd().openFile(file_name, .{}) catch return;
     defer file.close();
-    // le a primeira linha
-    try file.reader().readUntilDelimiterArrayList(&e.row, '\n', std.math.maxInt(usize));
-    e.numrows = 1;
+
+    while (true) {
+        const lines = try file.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
+        try e.rows.append(lines);
+        e.numrows += 1;
+    }
 }
 
 pub fn deinit(e: *Editor) void {
-    e.row.deinit();
+    for (e.rows.items) |i| e.alloc.free(i);
+    e.rows.deinit();
     e.buffer.deinit();
 }
 
@@ -201,7 +208,7 @@ fn drawRows(e: *Editor) !void {
             }
         } else {
             // BUG: the size must respect the terminal limits
-            const chars = e.row.items;
+            const chars = e.rows.items[y];
             var len = chars.len;
             if (chars.len > e.screencols) len = e.screencols;
             try e.buffer.appendSlice(chars);

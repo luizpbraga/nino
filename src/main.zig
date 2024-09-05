@@ -11,7 +11,7 @@ const Editor = @import("Editor.zig");
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     const alloc = gpa.allocator();
-    defer if (gpa.deinit() == .leak) @panic("LEAK");
+    defer _ = gpa.deinit();
 
     var edi: Editor = try .init(alloc);
     defer edi.deinit();

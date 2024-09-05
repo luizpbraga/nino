@@ -10,6 +10,7 @@ const VERSION = "0.0.1";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 const CTRL_Z = controlKey('z');
 const TABSTOP = 8;
+const STATUSBAR = 1;
 
 const Key = enum(usize) {
     ARROW_LEFT = 1000,
@@ -42,6 +43,8 @@ rows: std.ArrayList([]u8),
 render: std.ArrayList([]u8),
 /// allocator: common to rows and buffer
 alloc: std.mem.Allocator,
+/// file name
+file_name: []const u8 = "",
 /// Read the current terminal attributes into raw
 /// and save the terminal state
 pub fn init(alloc: std.mem.Allocator) !Editor {
@@ -51,7 +54,7 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         return error.CannotReadTheCurrentTerminalAttributes;
     }
 
-    var edi: Editor = .{
+    var e: Editor = .{
         .alloc = alloc,
         .rows = .init(alloc),
         .render = .init(alloc),
@@ -59,8 +62,9 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         .orig_termios = orig_termios,
     };
 
-    try edi.getWindowSize();
-    return edi;
+    try e.getWindowSize();
+
+    return e;
 }
 
 /// read the file rows
@@ -74,6 +78,8 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
         try e.rows.append(line);
         try e.updateRow(line); // try e.render.appendSlice(line);
     }
+
+    e.file_name = file_name;
 }
 
 pub fn deinit(e: *Editor) void {
@@ -191,6 +197,7 @@ pub fn refreshScreen(e: *Editor) !void {
 
     // try e.getWindowSize();
     try e.drawRows();
+    try e.drawStatusBar();
 
     // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
     // move the cursor
@@ -214,9 +221,11 @@ fn getWindowSize(e: *Editor) !void {
     }
     e.screen.y = ws.row;
     e.screen.x = ws.col;
+    // drawRows() will not try to draw in the last line in the screen
+    e.screen.y -= STATUSBAR;
 }
 
-fn drawTheWellcomeScreen(e: *Editor) !void {
+fn drawWellcomeScreen(e: *Editor) !void {
     const welllen = WELLCOME_STRING.len;
     var pedding = (e.screen.x - welllen) / 2;
 
@@ -232,6 +241,36 @@ fn drawTheWellcomeScreen(e: *Editor) !void {
     try e.buffer.appendSlice(WELLCOME_STRING);
 }
 
+fn drawStatusBar(e: *Editor) !void {
+    // switch colors
+    try e.buffer.appendSlice("\x1b[7m");
+
+    var lstatus: [80]u8 = undefined;
+    var llen = b: {
+        const file_name = if (e.file_name.len == 0) "[NO NAME]" else e.file_name;
+        const buf = try std.fmt.bufPrint(&lstatus, " {s}", .{file_name});
+        break :b if (buf.len > e.screen.x) e.screen.x else buf.len;
+    };
+
+    try e.buffer.appendSlice(lstatus[0..llen]);
+
+    var rstatus: [80]u8 = undefined;
+    const rlen = b: {
+        const buf = try std.fmt.bufPrint(&rstatus, "<{d}:{d} ", .{ e.cursor.y, e.cursor.x });
+        break :b buf.len;
+    };
+
+    while (llen < e.screen.x) : (llen += 1) {
+        if (e.screen.x - llen == rlen) {
+            try e.buffer.appendSlice(rstatus[0..rlen]);
+            break;
+        }
+        try e.buffer.append(' ');
+    }
+    // reswitch colors
+    try e.buffer.appendSlice("\x1b[m");
+}
+
 /// draw a column of (~) on the left hand side at the beginning of any line til EOF
 /// using the characters within the render display
 /// TODO: Clear lines one at a time
@@ -242,7 +281,7 @@ fn drawRows(e: *Editor) !void {
         if (file_row >= e.rows.items.len) {
             // prints the WELLCOME_STRING if where is no input file
             if (e.rows.items.len == 0 and y == e.screen.y / 3) {
-                try e.drawTheWellcomeScreen();
+                try e.drawWellcomeScreen();
             } else {
                 try e.buffer.append('~');
             }
@@ -255,10 +294,10 @@ fn drawRows(e: *Editor) !void {
 
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K");
-        if (y < e.screen.y - 1) {
-            _ = try e.buffer.appendSlice("\r\n");
-        }
+        // if (y < e.screen.y - 1) {
+        _ = try e.buffer.appendSlice("\r\n");
     }
+    //}
 }
 
 fn scroll(e: *Editor) void {

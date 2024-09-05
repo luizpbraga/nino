@@ -8,11 +8,16 @@ const stdout = std.io.getStdOut();
 const Editor = @This();
 const VERSION = "0.0.1";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
+
 const CTRL_Z = controlKey('z');
+const CTRL_L = controlKey('l');
+const CTRL_H = controlKey('h');
+
 const TABSTOP = 8;
 const STATUSBAR = 2;
 
 const Key = enum(usize) {
+    BACKSPACE = 127,
     ARROW_LEFT = 1000,
     ARROW_RIGHT,
     ARROW_UP,
@@ -85,9 +90,10 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
     while (true) {
         const line = try file.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
         // editorAppendRow: add a new line
-        try e.rows.append(line);
-        try e.updateRow(line); // try e.render.appendSlice(line);
+        try e.appendRow(line);
     }
+
+    if (e.numOfRows() == 0) try e.appendRow("");
 
     e.file_name = file_name;
 }
@@ -104,6 +110,18 @@ fn numOfRows(e: *Editor) usize {
     return e.rows.items.len;
 }
 
+fn appendRow(e: *Editor, chars: []u8) !void {
+    if (chars.len > 0) {
+        try e.rows.append(chars);
+        try e.updateRow(chars); // try e.render.appendSlice(line);
+        return;
+    }
+    const c = try e.alloc.alloc(u8, 1);
+    @memset(c, ' ');
+    try e.rows.append(c);
+    try e.updateRow(c); // try e.render.appendSlice(line);
+}
+
 pub fn setStatusMsg(e: *Editor, msg: []const u8) void {
     if (msg.len != 0) e.status = Editor.Status.new(msg);
 }
@@ -113,6 +131,12 @@ pub fn processKeyPressed(e: *Editor) !bool {
     const key = try Editor.readKey();
 
     switch (key) {
+        '\r' => {},
+
+        '\x1b', CTRL_L => {},
+
+        @intFromEnum(Key.BACKSPACE), @intFromEnum(Key.DEL), CTRL_H => {},
+
         CTRL_Z => {
             _ = try stdout.write("\x1b[2J");
             _ = try stdout.write("\x1b[H");
@@ -145,7 +169,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
             e.cursor.x = e.rows.items[e.cursor.y].len;
         },
         // @intFromEnum(Key.DEL) => edi.cursor.x -= 1,
-        else => {},
+        else => if (key < 128) try e.insertChar(@intCast(key)),
     }
 
     return false;
@@ -376,7 +400,8 @@ fn moveCursor(e: *Editor, key: usize) void {
 /// wait for one keypress, and return it.
 fn readKey() !usize {
     var buff: [1]u8 = .{'0'};
-    _ = try stdin.read(&buff);
+    // POR QUE CARALHOS ESSE LOOP !? HEIM?! FODA SE O CAPTALISMO
+    while (try stdin.read(&buff) != 1) {}
     const key = buff[0];
 
     if (key != '\x1b') {
@@ -437,4 +462,34 @@ fn readKey() !usize {
     };
 
     return '\x1b';
+}
+
+///inserts a single character into an row, at the current (x, y) cursor
+/// position.
+fn insertRowChar(e: *Editor, char: u8) !void {
+    const row = e.rows.items[e.cursor.y];
+    const cx = if (e.cursor.x > row.len) row.len else e.cursor.x;
+
+    // move the memory
+    // append 1 char
+    var nrow = try e.alloc.realloc(row, row.len + 1);
+    // var len: usize = nrow.len - 1;
+    // while (len > cx) : (len -= 1) nrow[len] = row[len - 1];
+    std.mem.copyForwards(u8, nrow[0..cx], row[0..cx]);
+    nrow[cx] = char;
+    std.mem.copyBackwards(u8, nrow[cx + 1 ..], row[cx..]);
+
+    e.rows.items[e.cursor.y] = nrow;
+
+    try std.testing.expectEqual(nrow, e.rows.items[e.cursor.y]);
+
+    try e.updateRow(nrow);
+}
+
+fn insertChar(e: *Editor, key: u8) !void {
+    if (e.cursor.y == e.numOfRows()) {
+        try e.appendRow("");
+    }
+    try e.insertRowChar(key);
+    e.cursor.x += 1;
 }

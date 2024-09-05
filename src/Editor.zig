@@ -22,18 +22,22 @@ const Key = enum(usize) {
     PAGE_DOWN,
 };
 
+/// 2d point Coordinate
+const Coordinate = struct { x: usize = 0, y: usize = 0 };
 /// cursor
-cursor: struct { x: usize = 0, y: usize = 0 } = .{},
+cursor: Coordinate = .{},
 /// offset
-offset: struct { rows: usize = 0, cols: usize = 0 } = .{},
+offset: Coordinate = .{},
 /// screen display
-screen: struct { rows: usize = 0, cols: usize = 0 } = .{},
+screen: Coordinate = .{},
 /// this little guy will hold the initial state
 orig_termios: linux.termios,
-/// espace sequece buffer
+/// espace sequece + line buffer
 buffer: std.ArrayList(u8),
 /// rows data
 rows: std.ArrayList([]u8),
+/// render nonprintable control character
+render: std.ArrayList([]u8),
 /// allocator: common to rows and buffer
 alloc: std.mem.Allocator,
 /// Read the current terminal attributes into raw
@@ -48,6 +52,7 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
     var edi: Editor = .{
         .alloc = alloc,
         .rows = .init(alloc),
+        .render = .init(alloc),
         .buffer = .init(alloc),
         .orig_termios = orig_termios,
     };
@@ -62,8 +67,10 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
     defer file.close();
 
     while (true) {
-        const lines = try file.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
-        try e.rows.append(lines);
+        const line = try file.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
+        // editorAppendRow: add a new line
+        try e.rows.append(line);
+        try e.updateRow(line); // try e.render.appendSlice(line);
     }
 }
 
@@ -71,6 +78,7 @@ pub fn deinit(e: *Editor) void {
     for (e.rows.items) |i| e.alloc.free(i);
     e.rows.deinit();
     e.buffer.deinit();
+    e.render.deinit();
 }
 
 /// handles the keypress
@@ -89,12 +97,12 @@ pub fn processKeyPressed(e: *Editor) !bool {
         @intFromEnum(Key.ARROW_LEFT),
         => e.moveCursor(key),
         @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => {
-            var times = e.screen.rows;
+            var times = e.screen.y;
             const k: Key = if (key == @intFromEnum(Key.PAGE_UP)) .ARROW_UP else .ARROW_DOWN;
             while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
         },
         @intFromEnum(Key.HOME) => e.cursor.x = 0,
-        @intFromEnum(Key.END) => e.cursor.x = e.screen.cols - 1,
+        @intFromEnum(Key.END) => e.cursor.x = e.screen.x - 1,
         // @intFromEnum(Key.DEL) => edi.cursor.x -= 1,
         else => {},
     }
@@ -104,6 +112,12 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
 fn controlKey(c: usize) usize {
     return c & 0x1f;
+}
+
+/// renders a row (line)
+fn updateRow(e: *Editor, row: []u8) !void {
+    e.render.clearAndFree();
+    try e.render.append(row);
 }
 
 /// see ncurses library for terminal capabilities
@@ -127,7 +141,7 @@ pub fn refreshScreen(e: *Editor) !void {
     // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
     // move the cursor
     // e.cursor.y now referees to the position of the cursor within file
-    try e.buffer.writer().print("\x1b[{};{}H", .{ e.cursor.y - e.offset.rows + 1, e.cursor.x - e.offset.cols + 1 });
+    try e.buffer.writer().print("\x1b[{};{}H", .{ e.cursor.y - e.offset.y + 1, e.cursor.x - e.offset.x + 1 });
 
     // show the cursor
     try e.buffer.appendSlice("\x1b[?25h");
@@ -141,8 +155,8 @@ fn getWindowSize(e: *Editor) !void {
     if (errno == -1 or ws.col == 0) {
         return error.CannotFindWindowSize;
     }
-    e.screen.rows = ws.row;
-    e.screen.cols = ws.col;
+    e.screen.y = ws.row;
+    e.screen.x = ws.col;
 }
 
 fn moveCursor(e: *Editor, key: usize) void {
@@ -179,7 +193,7 @@ fn moveCursor(e: *Editor, key: usize) void {
 fn drawTheWellcomeScreen(e: *Editor) !void {
     // BUG: tiny terminals: will it fit?
     const welllen = WELLCOME_STRING.len;
-    var pedding = (e.screen.cols - welllen) / 2;
+    var pedding = (e.screen.x - welllen) / 2;
 
     if (pedding > 0) {
         try e.buffer.append('~');
@@ -196,49 +210,41 @@ fn drawTheWellcomeScreen(e: *Editor) !void {
 /// draw a column of (~) on the left hand side at the beginning of any line til EOF
 /// TODO: Clear lines one at a time
 fn drawRows(e: *Editor) !void {
-    for (0..e.screen.rows) |y| {
-        const file_row = y + e.offset.rows;
+    for (0..e.screen.y) |y| {
+        const file_row = y + e.offset.y;
 
         if (file_row >= e.rows.items.len) {
             // prints the WELLCOME_STRING if where is no input file
-            if (e.rows.items.len == 0 and y == e.screen.rows / 3) {
+            if (e.rows.items.len == 0 and y == e.screen.y / 3) {
                 try e.drawTheWellcomeScreen();
             } else {
                 try e.buffer.append('~');
             }
         } else {
             const chars = e.rows.items[file_row];
-            var len = std.math.sub(usize, chars.len, e.offset.cols) catch 0;
-            if (len > e.screen.cols) len = e.screen.cols;
+            var len = std.math.sub(usize, chars.len, e.offset.x) catch 0;
+            if (len > e.screen.x) len = e.screen.x;
             for (0..len) |i| {
-                try e.buffer.append(chars[e.offset.cols + i]);
+                try e.buffer.append(chars[e.offset.x + i]);
             }
         }
 
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K");
-        if (y < e.screen.rows - 1) {
+        if (y < e.screen.y - 1) {
             _ = try e.buffer.appendSlice("\r\n");
         }
     }
 }
 
-// void editorAppendRow(char *s, size_t len) {
-//   E.row.size = len;
-//   E.row.chars = malloc(len + 1);
-//   memcpy(E.row.chars, s, len);
-//   E.row.chars[len] = '\0';
-//   E.numrows = 1;
-// }
-
 fn scroll(e: *Editor) void {
     // checks if the cursor is above the visible window; if so, scrool up
-    if (e.cursor.y < e.offset.rows) e.offset.rows = e.cursor.y;
+    if (e.cursor.y < e.offset.y) e.offset.y = e.cursor.y;
     // checks if the cursor is above the bottom of the visible windows
-    if (e.cursor.y >= e.offset.rows + e.screen.rows) e.offset.rows = e.cursor.y - e.screen.rows + 1;
+    if (e.cursor.y >= e.offset.y + e.screen.y) e.offset.y = e.cursor.y - e.screen.y + 1;
     // same shit to x
-    if (e.cursor.x < e.offset.cols) e.offset.cols = e.cursor.x;
-    if (e.cursor.x >= e.offset.cols + e.screen.cols) e.offset.cols = e.cursor.x - e.screen.cols + 1;
+    if (e.cursor.x < e.offset.x) e.offset.x = e.cursor.x;
+    if (e.cursor.x >= e.offset.x + e.screen.x) e.offset.x = e.cursor.x - e.screen.x + 1;
 }
 
 /// wait for one keypress, and return it.

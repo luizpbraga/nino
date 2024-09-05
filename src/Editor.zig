@@ -25,8 +25,9 @@ const Key = enum(usize) {
 
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
+const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 /// cursor
-cursor: Coordinate = .{},
+cursor: CursorCoordinate = .{},
 /// offset
 offset: Coordinate = .{},
 /// screen display
@@ -86,6 +87,7 @@ pub fn deinit(e: *Editor) void {
 /// handles the keypress
 pub fn processKeyPressed(e: *Editor) !bool {
     const key = try Editor.readKey();
+
     switch (key) {
         CTRL_Z => {
             _ = try stdout.write("\x1b[2J");
@@ -98,13 +100,26 @@ pub fn processKeyPressed(e: *Editor) !bool {
         @intFromEnum(Key.ARROW_RIGHT),
         @intFromEnum(Key.ARROW_LEFT),
         => e.moveCursor(key),
-        @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => {
-            var times = e.screen.y;
+        @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => |c| {
+
+            // positioning the cursor to the end/begin
+            switch (c) {
+                @intFromEnum(Key.PAGE_UP) => e.cursor.y = e.offset.y,
+                @intFromEnum(Key.PAGE_DOWN) => {
+                    e.cursor.y = e.offset.y + e.screen.y - 1;
+                    if (e.cursor.y > e.rows.items.len) e.cursor.y = e.rows.items.len;
+                },
+                else => {},
+            }
+
             const k: Key = if (key == @intFromEnum(Key.PAGE_UP)) .ARROW_UP else .ARROW_DOWN;
+            var times = e.screen.y;
             while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
         },
         @intFromEnum(Key.HOME) => e.cursor.x = 0,
-        @intFromEnum(Key.END) => e.cursor.x = e.screen.x - 1,
+        @intFromEnum(Key.END) => if (e.cursor.y < e.rows.items.len) {
+            e.cursor.x = e.rows.items[e.cursor.y].len;
+        },
         // @intFromEnum(Key.DEL) => edi.cursor.x -= 1,
         else => {},
     }
@@ -116,9 +131,19 @@ fn controlKey(c: usize) usize {
     return c & 0x1f;
 }
 
+/// covert char index to render index
+/// not working, i think
+fn cx2rx(e: *Editor) usize {
+    var rx: usize = 0;
+    for (e.rows.items[e.cursor.y][0..e.cursor.x]) |c| {
+        if (c == '\t') rx += (TABSTOP - 1) - (rx & TABSTOP);
+        rx += 1;
+    }
+    return rx;
+}
+
 /// renders a row (line)
 fn updateRow(e: *Editor, row: []u8) !void {
-
     // renders tabs as multiple space characters.
     const tabs = b: {
         var t: usize = 0;
@@ -129,25 +154,22 @@ fn updateRow(e: *Editor, row: []u8) !void {
     };
 
     const render = try e.alloc.alloc(u8, row.len + tabs * (TABSTOP - 1) + 1);
-
-    var i: usize = 0;
-    for (row, 0..) |char, j| {
-        if (char != '\t') {
-            render[i] = row[j];
-            i += 1;
-            continue;
-        }
-        // handles \t
-        render[i] = ' ';
-        i += 1;
-        while (i % 8 != 0) : (i += 1) {
+    {
+        var i: usize = 0;
+        for (row, 0..) |char, j| {
+            if (char != '\t') {
+                render[i] = row[j];
+                i += 1;
+                continue;
+            }
+            // handles \t
             render[i] = ' ';
+            i += 1;
+            while (i % 8 != 0) : (i += 1) {
+                render[i] = ' ';
+            }
         }
     }
-
-    var flog = try std.fs.cwd().createFile("src/log", .{});
-    defer flog.close();
-    try flog.writeAll(render);
 
     try e.render.append(render);
 }
@@ -173,7 +195,10 @@ pub fn refreshScreen(e: *Editor) !void {
     // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
     // move the cursor
     // e.cursor.y now referees to the position of the cursor within file
-    try e.buffer.writer().print("\x1b[{};{}H", .{ e.cursor.y - e.offset.y + 1, e.cursor.x - e.offset.x + 1 });
+    try e.buffer.writer().print("\x1b[{};{}H", .{
+        e.cursor.y - e.offset.y + 1,
+        e.cursor.rx - e.offset.x + 1,
+    });
 
     // show the cursor
     try e.buffer.appendSlice("\x1b[?25h");
@@ -191,39 +216,7 @@ fn getWindowSize(e: *Editor) !void {
     e.screen.x = ws.col;
 }
 
-fn moveCursor(e: *Editor, key: usize) void {
-    var maybe_cur_row = if (e.cursor.y >= e.rows.items.len) null else e.rows.items[e.cursor.y];
-
-    switch (key) {
-        @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 0) {
-            e.cursor.x -= 1;
-        },
-
-        // bound the cursor to the actual string size
-        @intFromEnum(Key.ARROW_RIGHT) => if (maybe_cur_row) |cur_row| {
-            if (e.cursor.x < cur_row.len) e.cursor.x += 1;
-        },
-
-        @intFromEnum(Key.ARROW_UP) => if (e.cursor.y != 0) {
-            e.cursor.y -= 1;
-        },
-
-        // scroll logic
-        @intFromEnum(Key.ARROW_DOWN) => if (e.cursor.y < e.rows.items.len) {
-            e.cursor.y += 1;
-        },
-
-        else => {},
-    }
-
-    // snap cursor to end of line (move to end)
-    maybe_cur_row = if (e.cursor.y >= e.rows.items.len) null else e.rows.items[e.cursor.y];
-    const row_len = if (maybe_cur_row) |row| row.len else 0;
-    if (e.cursor.x > row_len) e.cursor.x = row_len;
-}
-
 fn drawTheWellcomeScreen(e: *Editor) !void {
-    // BUG: tiny terminals: will it fit?
     const welllen = WELLCOME_STRING.len;
     var pedding = (e.screen.x - welllen) / 2;
 
@@ -269,13 +262,45 @@ fn drawRows(e: *Editor) !void {
 }
 
 fn scroll(e: *Editor) void {
+    e.cursor.rx = if (e.cursor.y < e.rows.items.len) e.cx2rx() else 0;
     // checks if the cursor is above the visible window; if so, scrool up
     if (e.cursor.y < e.offset.y) e.offset.y = e.cursor.y;
     // checks if the cursor is above the bottom of the visible windows
     if (e.cursor.y >= e.offset.y + e.screen.y) e.offset.y = e.cursor.y - e.screen.y + 1;
     // same shit to x
-    if (e.cursor.x < e.offset.x) e.offset.x = e.cursor.x;
-    if (e.cursor.x >= e.offset.x + e.screen.x) e.offset.x = e.cursor.x - e.screen.x + 1;
+    if (e.cursor.x < e.offset.x) e.offset.x = e.cursor.rx;
+    if (e.cursor.x >= e.offset.x + e.screen.x) e.offset.x = e.cursor.rx - e.screen.x + 1;
+}
+
+fn moveCursor(e: *Editor, key: usize) void {
+    var maybe_cur_row = if (e.cursor.y >= e.rows.items.len) null else e.rows.items[e.cursor.y];
+
+    switch (key) {
+        @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 0) {
+            e.cursor.x -= 1;
+        },
+
+        // bound the cursor to the actual string size
+        @intFromEnum(Key.ARROW_RIGHT) => if (maybe_cur_row) |cur_row| {
+            if (e.cursor.x < cur_row.len) e.cursor.x += 1;
+        },
+
+        @intFromEnum(Key.ARROW_UP) => if (e.cursor.y != 0) {
+            e.cursor.y -= 1;
+        },
+
+        // scroll logic
+        @intFromEnum(Key.ARROW_DOWN) => if (e.cursor.y < e.rows.items.len) {
+            e.cursor.y += 1;
+        },
+
+        else => {},
+    }
+
+    // snap cursor to end of line (move to end)
+    maybe_cur_row = if (e.cursor.y >= e.rows.items.len) null else e.rows.items[e.cursor.y];
+    const row_len = if (maybe_cur_row) |row| row.len else 0;
+    if (e.cursor.x > row_len) e.cursor.x = row_len;
 }
 
 /// wait for one keypress, and return it.

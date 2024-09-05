@@ -9,6 +9,7 @@ const Editor = @This();
 const VERSION = "0.0.1";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 const CTRL_Z = controlKey('z');
+const TABSTOP = 8;
 
 const Key = enum(usize) {
     ARROW_LEFT = 1000,
@@ -76,6 +77,7 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
 
 pub fn deinit(e: *Editor) void {
     for (e.rows.items) |i| e.alloc.free(i);
+    for (e.render.items) |i| e.alloc.free(i);
     e.rows.deinit();
     e.buffer.deinit();
     e.render.deinit();
@@ -116,8 +118,38 @@ fn controlKey(c: usize) usize {
 
 /// renders a row (line)
 fn updateRow(e: *Editor, row: []u8) !void {
-    e.render.clearAndFree();
-    try e.render.append(row);
+
+    // renders tabs as multiple space characters.
+    const tabs = b: {
+        var t: usize = 0;
+        for (row) |char| if (char == '\t') {
+            t += 1;
+        };
+        break :b t;
+    };
+
+    const render = try e.alloc.alloc(u8, row.len + tabs * (TABSTOP - 1) + 1);
+
+    var i: usize = 0;
+    for (row, 0..) |char, j| {
+        if (char != '\t') {
+            render[i] = row[j];
+            i += 1;
+            continue;
+        }
+        // handles \t
+        render[i] = ' ';
+        i += 1;
+        while (i % 8 != 0) : (i += 1) {
+            render[i] = ' ';
+        }
+    }
+
+    var flog = try std.fs.cwd().createFile("src/log", .{});
+    defer flog.close();
+    try flog.writeAll(render);
+
+    try e.render.append(render);
 }
 
 /// see ncurses library for terminal capabilities
@@ -208,6 +240,7 @@ fn drawTheWellcomeScreen(e: *Editor) !void {
 }
 
 /// draw a column of (~) on the left hand side at the beginning of any line til EOF
+/// using the characters within the render display
 /// TODO: Clear lines one at a time
 fn drawRows(e: *Editor) !void {
     for (0..e.screen.y) |y| {
@@ -221,12 +254,10 @@ fn drawRows(e: *Editor) !void {
                 try e.buffer.append('~');
             }
         } else {
-            const chars = e.rows.items[file_row];
+            const chars = e.render.items[file_row];
             var len = std.math.sub(usize, chars.len, e.offset.x) catch 0;
             if (len > e.screen.x) len = e.screen.x;
-            for (0..len) |i| {
-                try e.buffer.append(chars[e.offset.x + i]);
-            }
+            for (0..len) |i| try e.buffer.append(chars[e.offset.x + i]);
         }
 
         // clear each line as we redraw them

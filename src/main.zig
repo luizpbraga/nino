@@ -23,6 +23,8 @@ pub fn main() !void {
         try edi.open(file_name);
     }
 
+    edi.setStatusMsg("HELP: Ctrl-Z = quit");
+
     // starts the editor layout
     try Terminal.initRawMode(&edi);
     defer Terminal.deinitRawMode(&edi);

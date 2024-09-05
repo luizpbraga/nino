@@ -10,7 +10,7 @@ const VERSION = "0.0.1";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 const CTRL_Z = controlKey('z');
 const TABSTOP = 8;
-const STATUSBAR = 1;
+const STATUSBAR = 2;
 
 const Key = enum(usize) {
     ARROW_LEFT = 1000,
@@ -24,6 +24,14 @@ const Key = enum(usize) {
     PAGE_DOWN,
 };
 
+const Status = struct {
+    msg: []const u8 = "",
+    time: i64 = 0,
+
+    fn new(msg: []const u8) Status {
+        return .{ .msg = msg, .time = std.time.timestamp() };
+    }
+};
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
@@ -33,6 +41,8 @@ cursor: CursorCoordinate = .{},
 offset: Coordinate = .{},
 /// screen display
 screen: Coordinate = .{},
+/// status message
+status: Status = .{},
 /// this little guy will hold the initial state
 orig_termios: linux.termios,
 /// espace sequece + line buffer
@@ -90,6 +100,14 @@ pub fn deinit(e: *Editor) void {
     e.render.deinit();
 }
 
+fn numOfRows(e: *Editor) usize {
+    return e.rows.items.len;
+}
+
+pub fn setStatusMsg(e: *Editor, msg: []const u8) void {
+    if (msg.len != 0) e.status = Editor.Status.new(msg);
+}
+
 /// handles the keypress
 pub fn processKeyPressed(e: *Editor) !bool {
     const key = try Editor.readKey();
@@ -113,7 +131,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
                 @intFromEnum(Key.PAGE_UP) => e.cursor.y = e.offset.y,
                 @intFromEnum(Key.PAGE_DOWN) => {
                     e.cursor.y = e.offset.y + e.screen.y - 1;
-                    if (e.cursor.y > e.rows.items.len) e.cursor.y = e.rows.items.len;
+                    if (e.cursor.y > e.numOfRows()) e.cursor.y = e.numOfRows();
                 },
                 else => {},
             }
@@ -123,7 +141,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
             while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
         },
         @intFromEnum(Key.HOME) => e.cursor.x = 0,
-        @intFromEnum(Key.END) => if (e.cursor.y < e.rows.items.len) {
+        @intFromEnum(Key.END) => if (e.cursor.y < e.numOfRows()) {
             e.cursor.x = e.rows.items[e.cursor.y].len;
         },
         // @intFromEnum(Key.DEL) => edi.cursor.x -= 1,
@@ -198,6 +216,7 @@ pub fn refreshScreen(e: *Editor) !void {
     // try e.getWindowSize();
     try e.drawRows();
     try e.drawStatusBar();
+    try e.drawMessageBar();
 
     // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
     // move the cursor
@@ -241,6 +260,17 @@ fn drawWellcomeScreen(e: *Editor) !void {
     try e.buffer.appendSlice(WELLCOME_STRING);
 }
 
+fn drawMessageBar(e: *Editor) !void {
+    // clear the bar
+    try e.buffer.appendSlice("\x1b[K");
+    const msg = e.status.msg;
+    if (msg.len == 0) return;
+    const len = if (msg.len > e.screen.x) e.screen.x else msg.len;
+    if (std.time.timestamp() - e.status.time < 5) {
+        try e.buffer.appendSlice(msg[0..len]);
+    }
+}
+
 fn drawStatusBar(e: *Editor) !void {
     // switch colors
     try e.buffer.appendSlice("\x1b[7m");
@@ -269,6 +299,7 @@ fn drawStatusBar(e: *Editor) !void {
     }
     // reswitch colors
     try e.buffer.appendSlice("\x1b[m");
+    try e.buffer.appendSlice("\r\n");
 }
 
 /// draw a column of (~) on the left hand side at the beginning of any line til EOF
@@ -278,9 +309,9 @@ fn drawRows(e: *Editor) !void {
     for (0..e.screen.y) |y| {
         const file_row = y + e.offset.y;
 
-        if (file_row >= e.rows.items.len) {
+        if (file_row >= e.numOfRows()) {
             // prints the WELLCOME_STRING if where is no input file
-            if (e.rows.items.len == 0 and y == e.screen.y / 3) {
+            if (e.numOfRows() == 0 and y == e.screen.y / 3) {
                 try e.drawWellcomeScreen();
             } else {
                 try e.buffer.append('~');
@@ -301,7 +332,7 @@ fn drawRows(e: *Editor) !void {
 }
 
 fn scroll(e: *Editor) void {
-    e.cursor.rx = if (e.cursor.y < e.rows.items.len) e.cx2rx() else 0;
+    e.cursor.rx = if (e.cursor.y < e.numOfRows()) e.cx2rx() else 0;
     // checks if the cursor is above the visible window; if so, scrool up
     if (e.cursor.y < e.offset.y) e.offset.y = e.cursor.y;
     // checks if the cursor is above the bottom of the visible windows
@@ -312,7 +343,7 @@ fn scroll(e: *Editor) void {
 }
 
 fn moveCursor(e: *Editor, key: usize) void {
-    var maybe_cur_row = if (e.cursor.y >= e.rows.items.len) null else e.rows.items[e.cursor.y];
+    var maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
 
     switch (key) {
         @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 0) {
@@ -329,7 +360,7 @@ fn moveCursor(e: *Editor, key: usize) void {
         },
 
         // scroll logic
-        @intFromEnum(Key.ARROW_DOWN) => if (e.cursor.y < e.rows.items.len) {
+        @intFromEnum(Key.ARROW_DOWN) => if (e.cursor.y < e.numOfRows()) {
             e.cursor.y += 1;
         },
 
@@ -337,7 +368,7 @@ fn moveCursor(e: *Editor, key: usize) void {
     }
 
     // snap cursor to end of line (move to end)
-    maybe_cur_row = if (e.cursor.y >= e.rows.items.len) null else e.rows.items[e.cursor.y];
+    maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
     const row_len = if (maybe_cur_row) |row| row.len else 0;
     if (e.cursor.x > row_len) e.cursor.x = row_len;
 }

@@ -1,9 +1,12 @@
 const std = @import("std");
 
 const Status = @This();
-msg: []const u8 = "",
+msg: [80]u8 = undefined,
 time: i64 = 0,
 
-pub fn new(msg: []const u8) Status {
-    return .{ .msg = msg, .time = std.time.timestamp() };
+pub fn new(comptime fmt: []const u8, args: anytype) !Status {
+    var s: Status = .{};
+    _ = try std.fmt.bufPrint(&s.msg, fmt, args);
+    s.time = std.time.timestamp();
+    return s;
 }

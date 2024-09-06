@@ -134,8 +134,28 @@ fn appendRow(e: *Editor, chars: []u8) !void {
     try e.updateRow(row);
 }
 
-pub fn setStatusMsg(e: *Editor, msg: []const u8) void {
-    if (msg.len != 0) e.status = Editor.Status.new(msg);
+pub fn setStatusMsg(e: *Editor, comptime fmt: []const u8, args: anytype) !void {
+    if (fmt.len != 0) e.status = try Editor.Status.new(fmt, args);
+}
+
+fn save(e: *Editor) !void {
+    if (e.file_name.len == 0) {
+        return try e.setStatusMsg("Error: Cannot write", .{});
+    }
+
+    const file = e.flog orelse {
+        return try e.setStatusMsg("Error: Cannot write", .{});
+    };
+
+    var list = std.ArrayList(u8).init(e.alloc);
+    defer list.deinit();
+    for (e.row.items) |row| {
+        try list.writer().print("{s}\n", .{row.chars.items});
+    }
+    _ = list.popOrNull();
+
+    try file.writeAll(list.items);
+    try e.setStatusMsg("\"{s}\" {}L, {}B written", .{ e.file_name, e.numOfRows(), list.items.len });
 }
 
 /// handles the keypress
@@ -151,14 +171,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
         // '\x1b', CTRL_L => {},
 
-        CTRL_S => {
-            if (e.flog) |file| {
-                for (e.row.items) |row| {
-                    try file.writer().print("{s}\n", .{row.chars.items});
-                }
-                e.setStatusMsg(" FILE SAVED");
-            }
-        },
+        CTRL_S => try e.save(),
 
         .BACKSPACE, .DEL, CTRL_H => {},
 

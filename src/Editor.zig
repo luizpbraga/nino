@@ -110,6 +110,7 @@ fn numOfRows(e: *Editor) usize {
     return e.rows.items.len;
 }
 
+/// adds a new row and render
 fn appendRow(e: *Editor, chars: []u8) !void {
     if (chars.len > 0) {
         try e.rows.append(chars);
@@ -148,8 +149,8 @@ pub fn processKeyPressed(e: *Editor) !bool {
         @intFromEnum(Key.ARROW_RIGHT),
         @intFromEnum(Key.ARROW_LEFT),
         => e.moveCursor(key),
-        @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => |c| {
 
+        @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => |c| {
             // positioning the cursor to the end/begin
             switch (c) {
                 @intFromEnum(Key.PAGE_UP) => e.cursor.y = e.offset.y,
@@ -164,6 +165,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
             var times = e.screen.y;
             while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
         },
+
         @intFromEnum(Key.HOME) => e.cursor.x = 0,
         @intFromEnum(Key.END) => if (e.cursor.y < e.numOfRows()) {
             e.cursor.x = e.rows.items[e.cursor.y].len;
@@ -190,7 +192,7 @@ fn cx2rx(e: *Editor) usize {
     return rx;
 }
 
-/// renders a row (line)
+/// renders a render (line)
 fn updateRow(e: *Editor, row: []u8) !void {
     // renders tabs as multiple space characters.
     const tabs = b: {
@@ -201,7 +203,7 @@ fn updateRow(e: *Editor, row: []u8) !void {
         break :b t;
     };
 
-    const render = try e.alloc.alloc(u8, row.len + tabs * (TABSTOP - 1) + 1);
+    const render = try e.alloc.alloc(u8, row.len + tabs * (TABSTOP - 1));
     {
         var i: usize = 0;
         for (row, 0..) |char, j| {
@@ -217,8 +219,8 @@ fn updateRow(e: *Editor, row: []u8) !void {
                 render[i] = ' ';
             }
         }
+        try std.testing.expect(i == render.len);
     }
-
     try e.render.append(render);
 }
 
@@ -240,7 +242,7 @@ pub fn refreshScreen(e: *Editor) !void {
     // try e.getWindowSize();
     try e.drawRows();
     try e.drawStatusBar();
-    try e.drawMessageBar();
+    try e.drawMsgBar();
 
     // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
     // move the cursor
@@ -284,7 +286,7 @@ fn drawWellcomeScreen(e: *Editor) !void {
     try e.buffer.appendSlice(WELLCOME_STRING);
 }
 
-fn drawMessageBar(e: *Editor) !void {
+fn drawMsgBar(e: *Editor) !void {
     // clear the bar
     try e.buffer.appendSlice("\x1b[K");
     const msg = e.status.msg;
@@ -341,18 +343,15 @@ fn drawRows(e: *Editor) !void {
                 try e.buffer.append('~');
             }
         } else {
-            const chars = e.render.items[file_row];
+            const chars = e.rows.items[file_row];
             var len = std.math.sub(usize, chars.len, e.offset.x) catch 0;
             if (len > e.screen.x) len = e.screen.x;
             for (0..len) |i| try e.buffer.append(chars[e.offset.x + i]);
         }
-
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K");
-        // if (y < e.screen.y - 1) {
         _ = try e.buffer.appendSlice("\r\n");
     }
-    //}
 }
 
 fn scroll(e: *Editor) void {
@@ -466,30 +465,20 @@ fn readKey() !usize {
 
 ///inserts a single character into an row, at the current (x, y) cursor
 /// position.
-fn insertRowChar(e: *Editor, char: u8) !void {
-    const row = e.rows.items[e.cursor.y];
-    const cx = if (e.cursor.x > row.len) row.len else e.cursor.x;
-
-    // move the memory
-    // append 1 char
-    var nrow = try e.alloc.realloc(row, row.len + 1);
-    // var len: usize = nrow.len - 1;
-    // while (len > cx) : (len -= 1) nrow[len] = row[len - 1];
-    std.mem.copyForwards(u8, nrow[0..cx], row[0..cx]);
-    nrow[cx] = char;
-    std.mem.copyBackwards(u8, nrow[cx + 1 ..], row[cx..]);
-
-    e.rows.items[e.cursor.y] = nrow;
-
-    try std.testing.expectEqual(nrow, e.rows.items[e.cursor.y]);
-
-    try e.updateRow(nrow);
+fn rowInsertChar(e: *Editor, char: u8) !void {
+    var line = e.rows.items[e.cursor.y];
+    const cx = if (e.cursor.x > line.len) line.len else e.cursor.x;
+    var nline = try e.alloc.realloc(line, line.len + 1);
+    std.mem.copyBackwards(u8, nline[cx + 1 ..], line[cx..]);
+    nline[cx] = char;
+    e.rows.items[e.cursor.y] = nline;
+    try e.updateRow(nline);
 }
 
 fn insertChar(e: *Editor, key: u8) !void {
     if (e.cursor.y == e.numOfRows()) {
         try e.appendRow("");
     }
-    try e.insertRowChar(key);
+    try e.rowInsertChar(key);
     e.cursor.x += 1;
 }

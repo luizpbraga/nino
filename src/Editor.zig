@@ -3,6 +3,8 @@ const linux = std.os.linux;
 const ascii = std.ascii;
 const stdin = std.io.getStdIn();
 const stdout = std.io.getStdOut();
+const Row = @import("Row.zig");
+const Status = @import("Status.zig");
 
 /// deals with low-level terminal input and mapping
 const Editor = @This();
@@ -12,9 +14,14 @@ const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 const CTRL_Z = controlKey('z');
 const CTRL_L = controlKey('l');
 const CTRL_H = controlKey('h');
+const CTRL_S = controlKey('s');
 
 const TABSTOP = 8;
 const STATUSBAR = 2;
+
+/// 2d point Coordinate
+const Coordinate = struct { x: usize = 0, y: usize = 0 };
+const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 const Key = enum(usize) {
     BACKSPACE = 127,
@@ -29,17 +36,6 @@ const Key = enum(usize) {
     PAGE_DOWN,
 };
 
-const Status = struct {
-    msg: []const u8 = "",
-    time: i64 = 0,
-
-    fn new(msg: []const u8) Status {
-        return .{ .msg = msg, .time = std.time.timestamp() };
-    }
-};
-/// 2d point Coordinate
-const Coordinate = struct { x: usize = 0, y: usize = 0 };
-const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 /// cursor
 cursor: CursorCoordinate = .{},
 /// offset
@@ -52,14 +48,15 @@ status: Status = .{},
 orig_termios: linux.termios,
 /// espace sequece + line buffer
 buffer: std.ArrayList(u8),
-/// rows data
-rows: std.ArrayList([]u8),
-/// render nonprintable control character
-render: std.ArrayList([]u8),
 /// allocator: common to rows and buffer
 alloc: std.mem.Allocator,
 /// file name
 file_name: []const u8 = "",
+/// rows
+row: std.ArrayList(*Row),
+
+flog: ?std.fs.File = null,
+
 /// Read the current terminal attributes into raw
 /// and save the terminal state
 pub fn init(alloc: std.mem.Allocator) !Editor {
@@ -71,8 +68,7 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 
     var e: Editor = .{
         .alloc = alloc,
-        .rows = .init(alloc),
-        .render = .init(alloc),
+        .row = .init(alloc),
         .buffer = .init(alloc),
         .orig_termios = orig_termios,
     };
@@ -84,43 +80,55 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 
 /// read the file rows
 pub fn open(e: *Editor, file_name: []const u8) !void {
-    var file = std.fs.cwd().openFile(file_name, .{}) catch return;
-    defer file.close();
+    e.flog = std.fs.cwd().openFile(file_name, .{ .mode = .read_write }) catch f: {
+        break :f try std.fs.cwd().createFile(file_name, .{
+            .read = true,
+        });
+    };
 
+    var buf: [1024]u8 = undefined;
     while (true) {
-        const line = try file.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
-        // editorAppendRow: add a new line
+        // const line = try e.flog.?.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
+        const line = try e.flog.?.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
         try e.appendRow(line);
     }
-
-    if (e.numOfRows() == 0) try e.appendRow("");
 
     e.file_name = file_name;
 }
 
 pub fn deinit(e: *Editor) void {
-    for (e.rows.items) |i| e.alloc.free(i);
-    for (e.render.items) |i| e.alloc.free(i);
-    e.rows.deinit();
+    for (e.row.items) |row| {
+        row.render.deinit();
+        row.chars.deinit();
+        e.alloc.destroy(row);
+    }
+    e.row.deinit();
     e.buffer.deinit();
-    e.render.deinit();
+    if (e.flog) |file| file.close();
+}
+
+fn atRow(e: *Editor, at: usize) *Row {
+    return e.row.items[at];
 }
 
 fn numOfRows(e: *Editor) usize {
-    return e.rows.items.len;
+    return e.row.items.len;
+}
+
+/// create and collect a new row
+fn createRow(e: *Editor) !*Row {
+    var row = try e.alloc.create(Row);
+    row.chars = .init(e.alloc);
+    row.render = .init(e.alloc);
+    try e.row.append(row);
+    return row;
 }
 
 /// adds a new row and render
 fn appendRow(e: *Editor, chars: []u8) !void {
-    if (chars.len > 0) {
-        try e.rows.append(chars);
-        try e.updateRow(chars); // try e.render.appendSlice(line);
-        return;
-    }
-    const c = try e.alloc.alloc(u8, 1);
-    @memset(c, ' ');
-    try e.rows.append(c);
-    try e.updateRow(c); // try e.render.appendSlice(line);
+    var row = try e.createRow();
+    try row.chars.appendSlice(chars);
+    try e.updateRow(row);
 }
 
 pub fn setStatusMsg(e: *Editor, msg: []const u8) void {
@@ -135,6 +143,15 @@ pub fn processKeyPressed(e: *Editor) !bool {
         '\r' => {},
 
         '\x1b', CTRL_L => {},
+
+        CTRL_S => {
+            if (e.flog) |file| {
+                for (e.row.items) |row| {
+                    try file.writer().print("{s}\n", .{row.chars.items});
+                }
+                e.setStatusMsg(" FILE SAVED");
+            }
+        },
 
         @intFromEnum(Key.BACKSPACE), @intFromEnum(Key.DEL), CTRL_H => {},
 
@@ -168,7 +185,10 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
         @intFromEnum(Key.HOME) => e.cursor.x = 0,
         @intFromEnum(Key.END) => if (e.cursor.y < e.numOfRows()) {
-            e.cursor.x = e.rows.items[e.cursor.y].len;
+            const chars = e.row.items[e.cursor.y].chars.items;
+            // const chars = e.atRow(e.cursor.y).asChars();
+            e.cursor.x = chars.len;
+            // e.cursor.x = e.rows.items[e.cursor.y].len;
         },
         // @intFromEnum(Key.DEL) => edi.cursor.x -= 1,
         else => if (key < 128) try e.insertChar(@intCast(key)),
@@ -185,7 +205,9 @@ fn controlKey(c: usize) usize {
 /// not working, i think
 fn cx2rx(e: *Editor) usize {
     var rx: usize = 0;
-    for (e.rows.items[e.cursor.y][0..e.cursor.x]) |c| {
+    const chars = e.row.items[e.cursor.y].chars.items;
+    // for (e.rows.items[e.cursor.y][0..e.cursor.x]) |c| {
+    for (chars[0..e.cursor.x]) |c| {
         if (c == '\t') rx += (TABSTOP - 1) - (rx & TABSTOP);
         rx += 1;
     }
@@ -193,35 +215,34 @@ fn cx2rx(e: *Editor) usize {
 }
 
 /// renders a render (line)
-fn updateRow(e: *Editor, row: []u8) !void {
+/// TODO: precisa mesmo do row???
+fn updateRow(_: *Editor, row: *Row) !void {
     // renders tabs as multiple space characters.
-    const tabs = b: {
-        var t: usize = 0;
-        for (row) |char| if (char == '\t') {
-            t += 1;
-        };
-        break :b t;
+    var tabs: usize = 0;
+    for (row.chars.items) |char| if (char == '\t') {
+        tabs += 1;
     };
 
-    const render = try e.alloc.alloc(u8, row.len + tabs * (TABSTOP - 1));
+    // e.alloc.free(try row.render.toOwnedSlice());
+    row.render.clearAndFree();
+    try row.render.resize(row.chars.items.len + tabs * (TABSTOP - 1));
     {
         var i: usize = 0;
-        for (row, 0..) |char, j| {
+        for (row.chars.items, 0..) |char, j| {
             if (char != '\t') {
-                render[i] = row[j];
+                row.render.items[i] = row.chars.items[j];
                 i += 1;
                 continue;
             }
             // handles \t
-            render[i] = ' ';
+            row.render.items[i] = ' ';
             i += 1;
             while (i % 8 != 0) : (i += 1) {
-                render[i] = ' ';
+                row.render.items[i] = ' ';
             }
         }
-        try std.testing.expect(i == render.len);
+        try std.testing.expect(i == row.render.items.len);
     }
-    try e.render.append(render);
 }
 
 /// see ncurses library for terminal capabilities
@@ -343,10 +364,11 @@ fn drawRows(e: *Editor) !void {
                 try e.buffer.append('~');
             }
         } else {
-            const chars = e.rows.items[file_row];
-            var len = std.math.sub(usize, chars.len, e.offset.x) catch 0;
+            // const renders = e.render.items[file_row];
+            const renders = e.row.items[file_row].render.items;
+            var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
             if (len > e.screen.x) len = e.screen.x;
-            for (0..len) |i| try e.buffer.append(chars[e.offset.x + i]);
+            for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
         }
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K");
@@ -366,7 +388,8 @@ fn scroll(e: *Editor) void {
 }
 
 fn moveCursor(e: *Editor, key: usize) void {
-    var maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
+    // var maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
+    var maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.row.items[e.cursor.y].chars.items;
 
     switch (key) {
         @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 0) {
@@ -391,7 +414,8 @@ fn moveCursor(e: *Editor, key: usize) void {
     }
 
     // snap cursor to end of line (move to end)
-    maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
+    maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.row.items[e.cursor.y].chars.items;
+    // maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
     const row_len = if (maybe_cur_row) |row| row.len else 0;
     if (e.cursor.x > row_len) e.cursor.x = row_len;
 }
@@ -466,13 +490,10 @@ fn readKey() !usize {
 ///inserts a single character into an row, at the current (x, y) cursor
 /// position.
 fn rowInsertChar(e: *Editor, char: u8) !void {
-    var line = e.rows.items[e.cursor.y];
-    const cx = if (e.cursor.x > line.len) line.len else e.cursor.x;
-    var nline = try e.alloc.realloc(line, line.len + 1);
-    std.mem.copyBackwards(u8, nline[cx + 1 ..], line[cx..]);
-    nline[cx] = char;
-    e.rows.items[e.cursor.y] = nline;
-    try e.updateRow(nline);
+    const len = e.row.items[e.cursor.y].chars.items.len;
+    const cx = if (e.cursor.x > len) len else e.cursor.x;
+    try e.row.items[e.cursor.y].chars.insert(cx, char);
+    try e.updateRow(e.row.items[e.cursor.y]);
 }
 
 fn insertChar(e: *Editor, key: u8) !void {

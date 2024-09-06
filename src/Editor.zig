@@ -24,7 +24,7 @@ const Coordinate = struct { x: usize = 0, y: usize = 0 };
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 const Key = enum(usize) {
-    CARRIAGERETURN = '\r',
+    ENTER = '\r',
     BACKSPACE = 127,
     ARROW_LEFT = 1000,
     ARROW_RIGHT,
@@ -88,6 +88,7 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
         });
     };
 
+    // BUG:
     var buf: [1024]u8 = undefined;
     while (true) {
         // TODO: fix this issue
@@ -164,7 +165,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
     const key_tag: Key = @enumFromInt(key);
 
     switch (key_tag) {
-        .CARRIAGERETURN => {
+        .ENTER => {
             e.cursor.x = 0;
             e.cursor.y += 1;
         },
@@ -173,7 +174,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
         CTRL_S => try e.save(),
 
-        .BACKSPACE, .DEL, CTRL_H => {},
+        .BACKSPACE => try e.deleteChar(),
 
         CTRL_Z => {
             _ = try stdout.write("\x1b[2J");
@@ -408,23 +409,24 @@ fn scroll(e: *Editor) void {
 fn moveCursor(e: *Editor, key: usize) void {
     // var maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.rows.items[e.cursor.y];
     var maybe_cur_row = if (e.cursor.y >= e.numOfRows()) null else e.row.items[e.cursor.y].chars.items;
+    const key_tag: Key = @enumFromInt(key);
 
-    switch (key) {
-        @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 0) {
+    switch (key_tag) {
+        .ARROW_LEFT => if (e.cursor.x != 0) {
             e.cursor.x -= 1;
         },
 
         // bound the cursor to the actual string size
-        @intFromEnum(Key.ARROW_RIGHT) => if (maybe_cur_row) |cur_row| {
+        .ARROW_RIGHT => if (maybe_cur_row) |cur_row| {
             if (e.cursor.x < cur_row.len) e.cursor.x += 1;
         },
 
-        @intFromEnum(Key.ARROW_UP) => if (e.cursor.y != 0) {
+        .ARROW_UP => if (e.cursor.y != 0) {
             e.cursor.y -= 1;
         },
 
         // scroll logic
-        @intFromEnum(Key.ARROW_DOWN) => if (e.cursor.y < e.numOfRows()) {
+        .ARROW_DOWN => if (e.cursor.y < e.numOfRows()) {
             e.cursor.y += 1;
         },
 
@@ -520,4 +522,19 @@ fn insertChar(e: *Editor, key: u8) !void {
     }
     try e.rowInsertChar(key);
     e.cursor.x += 1;
+}
+
+///deletes a single character into an row, at the current (x, y) cursor
+/// position.
+fn rowDeleteChar(e: *Editor) !void {
+    const len = e.row.items[e.cursor.y].chars.items.len;
+    const cx = if (e.cursor.x > len) return else e.cursor.x - 1;
+    _ = e.row.items[e.cursor.y].chars.orderedRemove(cx);
+    try e.updateRow(e.row.items[e.cursor.y]);
+}
+
+fn deleteChar(e: *Editor) !void {
+    if (e.cursor.y == e.numOfRows() or e.cursor.x == 0) return;
+    try e.rowDeleteChar();
+    e.cursor.x -= 1;
 }

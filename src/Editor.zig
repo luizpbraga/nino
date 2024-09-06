@@ -24,6 +24,7 @@ const Coordinate = struct { x: usize = 0, y: usize = 0 };
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 const Key = enum(usize) {
+    CARRIAGERETURN = '\r',
     BACKSPACE = 127,
     ARROW_LEFT = 1000,
     ARROW_RIGHT,
@@ -34,6 +35,7 @@ const Key = enum(usize) {
     END,
     PAGE_UP,
     PAGE_DOWN,
+    _,
 };
 
 /// cursor
@@ -88,6 +90,7 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
 
     var buf: [1024]u8 = undefined;
     while (true) {
+        // TODO: fix this issue
         // const line = try e.flog.?.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
         const line = try e.flog.?.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
         try e.appendRow(line);
@@ -138,11 +141,15 @@ pub fn setStatusMsg(e: *Editor, msg: []const u8) void {
 /// handles the keypress
 pub fn processKeyPressed(e: *Editor) !bool {
     const key = try Editor.readKey();
+    const key_tag: Key = @enumFromInt(key);
 
-    switch (key) {
-        '\r' => {},
+    switch (key_tag) {
+        .CARRIAGERETURN => {
+            e.cursor.x = 0;
+            e.cursor.y += 1;
+        },
 
-        '\x1b', CTRL_L => {},
+        // '\x1b', CTRL_L => {},
 
         CTRL_S => {
             if (e.flog) |file| {
@@ -153,52 +160,52 @@ pub fn processKeyPressed(e: *Editor) !bool {
             }
         },
 
-        @intFromEnum(Key.BACKSPACE), @intFromEnum(Key.DEL), CTRL_H => {},
+        .BACKSPACE, .DEL, CTRL_H => {},
 
         CTRL_Z => {
             _ = try stdout.write("\x1b[2J");
             _ = try stdout.write("\x1b[H");
             return true;
         },
+
         // cursor movement keys
-        @intFromEnum(Key.ARROW_UP),
-        @intFromEnum(Key.ARROW_DOWN),
-        @intFromEnum(Key.ARROW_RIGHT),
-        @intFromEnum(Key.ARROW_LEFT),
+        .ARROW_UP,
+        .ARROW_DOWN,
+        .ARROW_RIGHT,
+        .ARROW_LEFT,
         => e.moveCursor(key),
 
-        @intFromEnum(Key.PAGE_UP), @intFromEnum(Key.PAGE_DOWN) => |c| {
+        .PAGE_UP, .PAGE_DOWN => |c| {
             // positioning the cursor to the end/begin
             switch (c) {
-                @intFromEnum(Key.PAGE_UP) => e.cursor.y = e.offset.y,
-                @intFromEnum(Key.PAGE_DOWN) => {
+                .PAGE_UP => e.cursor.y = e.offset.y,
+
+                .PAGE_DOWN => {
                     e.cursor.y = e.offset.y + e.screen.y - 1;
                     if (e.cursor.y > e.numOfRows()) e.cursor.y = e.numOfRows();
                 },
                 else => {},
             }
 
-            const k: Key = if (key == @intFromEnum(Key.PAGE_UP)) .ARROW_UP else .ARROW_DOWN;
+            const k: Key = if (key_tag == .PAGE_UP) .ARROW_UP else .ARROW_DOWN;
             var times = e.screen.y;
             while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
         },
 
-        @intFromEnum(Key.HOME) => e.cursor.x = 0,
-        @intFromEnum(Key.END) => if (e.cursor.y < e.numOfRows()) {
+        .HOME => e.cursor.x = 0,
+
+        .END => if (e.cursor.y < e.numOfRows()) {
             const chars = e.row.items[e.cursor.y].chars.items;
-            // const chars = e.atRow(e.cursor.y).asChars();
             e.cursor.x = chars.len;
-            // e.cursor.x = e.rows.items[e.cursor.y].len;
         },
-        // @intFromEnum(Key.DEL) => edi.cursor.x -= 1,
         else => if (key < 128) try e.insertChar(@intCast(key)),
     }
 
     return false;
 }
 
-fn controlKey(c: usize) usize {
-    return c & 0x1f;
+fn controlKey(c: usize) Key {
+    return @enumFromInt(c & 0x1f);
 }
 
 /// covert char index to render index
@@ -206,7 +213,6 @@ fn controlKey(c: usize) usize {
 fn cx2rx(e: *Editor) usize {
     var rx: usize = 0;
     const chars = e.row.items[e.cursor.y].chars.items;
-    // for (e.rows.items[e.cursor.y][0..e.cursor.x]) |c| {
     for (chars[0..e.cursor.x]) |c| {
         if (c == '\t') rx += (TABSTOP - 1) - (rx & TABSTOP);
         rx += 1;
@@ -223,7 +229,6 @@ fn updateRow(_: *Editor, row: *Row) !void {
         tabs += 1;
     };
 
-    // e.alloc.free(try row.render.toOwnedSlice());
     row.render.clearAndFree();
     try row.render.resize(row.chars.items.len + tabs * (TABSTOP - 1));
     {

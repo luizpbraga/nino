@@ -174,7 +174,11 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
         CTRL_S => try e.save(),
 
-        .BACKSPACE => try e.deleteChar(),
+        .BACKSPACE, CTRL_H => try e.deleteChar(),
+        .DEL => {
+            e.moveCursor(@intFromEnum(Key.ARROW_RIGHT));
+            try e.deleteChar();
+        },
 
         CTRL_Z => {
             _ = try stdout.write("\x1b[2J");

@@ -56,8 +56,8 @@ alloc: std.mem.Allocator,
 file_name: []const u8 = "",
 /// rows
 row: std.ArrayList(*Row),
-
-flog: ?std.fs.File = null,
+/// file status (TODO)
+file_status: usize = 0,
 
 /// Read the current terminal attributes into raw
 /// and save the terminal state
@@ -82,22 +82,24 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 
 /// read the file rows
 pub fn open(e: *Editor, file_name: []const u8) !void {
-    e.flog = std.fs.cwd().openFile(file_name, .{ .mode = .read_write }) catch f: {
+    var flog = std.fs.cwd().openFile(file_name, .{ .mode = .read_write }) catch f: {
         break :f try std.fs.cwd().createFile(file_name, .{
             .read = true,
         });
     };
+    defer flog.close();
 
     // BUG:
     var buf: [1024]u8 = undefined;
     while (true) {
         // TODO: fix this issue
         // const line = try e.flog.?.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
-        const line = try e.flog.?.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
+        const line = try flog.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
         try e.appendRow(line);
     }
 
     e.file_name = file_name;
+    e.file_status = 0;
 }
 
 pub fn deinit(e: *Editor) void {
@@ -108,7 +110,6 @@ pub fn deinit(e: *Editor) void {
     }
     e.row.deinit();
     e.buffer.deinit();
-    if (e.flog) |file| file.close();
 }
 
 fn atRow(e: *Editor, at: usize) *Row {
@@ -117,22 +118,6 @@ fn atRow(e: *Editor, at: usize) *Row {
 
 fn numOfRows(e: *Editor) usize {
     return e.row.items.len;
-}
-
-/// create and collect a new row
-fn createRow(e: *Editor) !*Row {
-    var row = try e.alloc.create(Row);
-    row.chars = .init(e.alloc);
-    row.render = .init(e.alloc);
-    try e.row.append(row);
-    return row;
-}
-
-/// adds a new row and render
-fn appendRow(e: *Editor, chars: []u8) !void {
-    var row = try e.createRow();
-    try row.chars.appendSlice(chars);
-    try e.updateRow(row);
 }
 
 pub fn setStatusMsg(e: *Editor, comptime fmt: []const u8, args: anytype) !void {
@@ -144,9 +129,9 @@ fn save(e: *Editor) !void {
         return try e.setStatusMsg("Error: Cannot write", .{});
     }
 
-    const file = e.flog orelse {
-        return try e.setStatusMsg("Error: Cannot write", .{});
-    };
+    if (e.file_status == 0) {
+        return try e.setStatusMsg("Warn: Nothing to write", .{});
+    }
 
     var list = std.ArrayList(u8).init(e.alloc);
     defer list.deinit();
@@ -155,7 +140,14 @@ fn save(e: *Editor) !void {
     }
     _ = list.popOrNull();
 
+    const cwd = std.fs.cwd();
+    try cwd.deleteFile(e.file_name);
+
+    var file = try cwd.createFile(e.file_name, .{});
+    defer file.close();
+
     try file.writeAll(list.items);
+    e.file_status = 0;
     try e.setStatusMsg("\"{s}\" {}L, {}B written", .{ e.file_name, e.numOfRows(), list.items.len });
 }
 
@@ -347,8 +339,9 @@ fn drawStatusBar(e: *Editor) !void {
 
     var lstatus: [80]u8 = undefined;
     var llen = b: {
+        const modified = if (e.file_status == 0) "" else "[+]";
         const file_name = if (e.file_name.len == 0) "[NO NAME]" else e.file_name;
-        const buf = try std.fmt.bufPrint(&lstatus, " {s}", .{file_name});
+        const buf = try std.fmt.bufPrint(&lstatus, " {s} {s}", .{ file_name, modified });
         break :b if (buf.len > e.screen.x) e.screen.x else buf.len;
     };
 
@@ -511,6 +504,23 @@ fn readKey() !usize {
     return '\x1b';
 }
 
+/// create and collect a new row
+fn createRow(e: *Editor) !*Row {
+    var row = try e.alloc.create(Row);
+    row.chars = .init(e.alloc);
+    row.render = .init(e.alloc);
+    try e.row.append(row);
+    return row;
+}
+
+/// adds a new row and render
+fn appendRow(e: *Editor, chars: []u8) !void {
+    var row = try e.createRow();
+    try row.chars.appendSlice(chars);
+    try e.updateRow(row);
+    e.file_status += 1;
+}
+
 ///inserts a single character into an row, at the current (x, y) cursor
 /// position.
 fn rowInsertChar(e: *Editor, char: u8) !void {
@@ -518,6 +528,7 @@ fn rowInsertChar(e: *Editor, char: u8) !void {
     const cx = if (e.cursor.x > len) len else e.cursor.x;
     try e.row.items[e.cursor.y].chars.insert(cx, char);
     try e.updateRow(e.row.items[e.cursor.y]);
+    e.file_status += 1;
 }
 
 fn insertChar(e: *Editor, key: u8) !void {
@@ -535,10 +546,42 @@ fn rowDeleteChar(e: *Editor) !void {
     const cx = if (e.cursor.x > len) return else e.cursor.x - 1;
     _ = e.row.items[e.cursor.y].chars.orderedRemove(cx);
     try e.updateRow(e.row.items[e.cursor.y]);
+    e.file_status += 1;
+}
+
+fn freeRow(e: *Editor) void {
+    var row = e.row.items[e.cursor.y];
+    defer e.alloc.destroy(row);
+    row.chars.deinit();
+    row.render.deinit();
+    _ = e.row.orderedRemove(e.cursor.y);
+}
+
+fn deleteRow(e: *Editor) void {
+    e.freeRow();
+    e.file_status += 1;
 }
 
 fn deleteChar(e: *Editor) !void {
-    if (e.cursor.y == e.numOfRows() or e.cursor.x == 0) return;
-    try e.rowDeleteChar();
-    e.cursor.x -= 1;
+    if (e.cursor.y == e.numOfRows()) return;
+    if (e.cursor.y == 0 and e.cursor.x == 0) return;
+
+    if (e.cursor.x > 0) {
+        try e.rowDeleteChar();
+        e.cursor.x -= 1;
+        return;
+    }
+
+    // handle appending to the prev. line
+    e.cursor.x = e.row.items[e.cursor.y - 1].charsLen();
+    try e.rowAppendString(e.row.items[e.cursor.y - 1]);
+    e.deleteRow();
+    e.cursor.y -= 1;
+}
+
+fn rowAppendString(e: *Editor, prevrow: *Row) !void {
+    const currrow = e.row.items[e.cursor.y];
+    try prevrow.chars.appendSlice(currrow.chars.items);
+    try e.updateRow(prevrow);
+    e.file_status += 1;
 }

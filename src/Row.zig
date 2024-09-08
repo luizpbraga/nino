@@ -14,10 +14,10 @@ pub fn asRender(r: *Row) []u8 {
     return r.chars.items;
 }
 
-pub fn rlen(r: *Row) usize {
+pub fn renderLen(r: *Row) usize {
     return r.render.items.len;
 }
 
-pub fn clen(r: *Row) usize {
+pub fn charsLen(r: *Row) usize {
     return r.chars.items.len;
 }

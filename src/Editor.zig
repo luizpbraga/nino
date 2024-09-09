@@ -16,8 +16,9 @@ const CTRL_L = controlKey('l');
 const CTRL_H = controlKey('h');
 const CTRL_S = controlKey('s');
 
-const TABSTOP = 4;
-const STATUSBAR = 2;
+var TABSTOP: usize = 4;
+var STATUSBAR: usize = 2;
+var allocname = false;
 
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
@@ -25,6 +26,7 @@ const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 const Key = enum(usize) {
     ENTER = '\r',
+    ESC = '\x1b',
     BACKSPACE = 127,
     ARROW_LEFT = 1000,
     ARROW_RIGHT,
@@ -58,6 +60,8 @@ file_name: []const u8 = "",
 row: std.ArrayList(*Row),
 /// file status (TODO)
 file_status: usize = 0,
+/// mode
+mode: enum { normal, insert, visual } = .insert,
 
 /// Read the current terminal attributes into raw
 /// and save the terminal state
@@ -82,11 +86,10 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 
 /// read the file rows
 pub fn open(e: *Editor, file_name: []const u8) !void {
-    var flog = std.fs.cwd().openFile(file_name, .{ .mode = .read_write }) catch f: {
-        break :f try std.fs.cwd().createFile(file_name, .{
-            .read = true,
-        });
-    };
+    // TODO: WHAT?!?!?
+    var flog = std.fs.cwd().openFile(file_name, .{ .mode = .read_write }) catch
+        try std.fs.cwd().createFile(file_name, .{ .read = true });
+
     defer flog.close();
 
     // BUG:
@@ -110,6 +113,7 @@ pub fn deinit(e: *Editor) void {
     }
     e.row.deinit();
     e.buffer.deinit();
+    if (allocname) e.alloc.free(e.file_name);
 }
 
 fn rowAt(e: *Editor, at: usize) *Row {
@@ -121,39 +125,62 @@ fn numOfRows(e: *Editor) usize {
 }
 
 pub fn setStatusMsg(e: *Editor, comptime fmt: []const u8, args: anytype) !void {
-    if (fmt.len != 0) e.status = try Editor.Status.new(fmt, args);
+    if (fmt.len != 0) e.status = try Status.new(fmt, args);
+}
+
+fn toString(e: *Editor) ![]const u8 {
+    var list = std.ArrayList(u8).init(e.alloc);
+    errdefer list.deinit();
+    for (e.row.items) |row| {
+        try list.writer().print("{s}\n", .{row.chars.items});
+    }
+    _ = list.popOrNull();
+    return list.toOwnedSlice();
 }
 
 fn save(e: *Editor) !void {
+    var delete = true;
+
     if (e.file_name.len == 0) {
-        return try e.setStatusMsg("Error: Cannot write", .{});
+        // BUG: LEAK
+        e.file_name = try e.prompt("Save as: {s}") orelse {
+            return try e.setStatusMsg("Error: Cannot write", .{});
+        };
+        allocname = true;
+        delete = false;
     }
 
     if (e.file_status == 0) {
         return try e.setStatusMsg("Warn: Nothing to write", .{});
     }
 
-    var list = std.ArrayList(u8).init(e.alloc);
-    defer list.deinit();
-    for (e.row.items) |row| {
-        try list.writer().print("{s}\n", .{row.chars.items});
-    }
-    _ = list.popOrNull();
-
     const cwd = std.fs.cwd();
-    try cwd.deleteFile(e.file_name);
+    if (delete) try cwd.deleteFile(e.file_name);
 
     var file = try cwd.createFile(e.file_name, .{});
     defer file.close();
 
-    try file.writeAll(list.items);
+    const rows = try e.toString();
+    defer e.alloc.free(rows);
+
+    try file.writeAll(rows);
+
     e.file_status = 0;
-    try e.setStatusMsg("\"{s}\" {}L, {}B written", .{ e.file_name, e.numOfRows(), list.items.len });
+
+    try e.setStatusMsg("\"{s}\" {}L, {}B written", .{ e.file_name, e.numOfRows(), rows.len });
+}
+
+pub fn processKeyPressed(e: *Editor) !bool {
+    return switch (e.mode) {
+        .normal => try e.processKeyPressedInsertMode(),
+        .insert => try e.processKeyPressedInsertMode(),
+        .visual => true,
+    };
 }
 
 /// handles the keypress
-pub fn processKeyPressed(e: *Editor) !bool {
-    const key = try Editor.readKey();
+fn processKeyPressedInsertMode(e: *Editor) !bool {
+    const key = try readKey();
     const key_tag: Key = @enumFromInt(key);
 
     switch (key_tag) {
@@ -263,7 +290,7 @@ fn updateRow(_: *Editor, row: *Row) !void {
             // handles \t
             row.render.items[idx] = ' ';
             idx += 1;
-            while (idx % 8 != 0) : (idx += 1) {
+            while (idx % TABSTOP != 0) : (idx += 1) {
                 row.render.items[idx] = ' ';
             }
         }
@@ -625,21 +652,30 @@ fn rowAppendString(e: *Editor, row: *Row, string: []const u8) !void {
     try e.updateRow(row);
 }
 
-/// prompting the user input
-fn prompt(e: *Editor) ![128]u8 {
-    var buf: [128]u8 = undefined;
-    @memset(&buf, 0);
+/// displays a prompt in the status bar & and lets the user input a line
+/// afther the prompt
+/// callow own the memmory
+fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
+    var input: std.ArrayList(u8) = .init(e.alloc);
+    defer input.deinit();
 
     while (true) {
-        try e.setStatusMsg("{s}", .{buf});
+        try e.setStatusMsg(prompt_fmt, .{input.items});
         try e.refreshScreen();
 
-        switch (try e.readKey()) {
-            '\r' => {
-                return buf;
+        switch (try readKey()) {
+            '\x1b' => {
+                try e.setStatusMsg("", .{});
+                return null;
             },
-            else => |c| {
-                _ = c; // autofix
+
+            '\r' => if (input.items.len != 0) {
+                try e.setStatusMsg("", .{});
+                return try input.toOwnedSlice();
+            },
+
+            else => |c| if (c >= 0 and c < 128) {
+                try input.append(@intCast(c));
             },
         }
     }

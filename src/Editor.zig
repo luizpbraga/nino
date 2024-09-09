@@ -63,7 +63,7 @@ row: std.ArrayList(*Row),
 /// file status (TODO)
 file_status: usize = 0,
 /// mode
-mode: enum { normal, insert, visual } = .insert,
+mode: enum { normal, insert, visual, command } = .insert,
 
 /// Read the current terminal attributes into raw
 /// and save the terminal state
@@ -89,17 +89,19 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 /// read the file rows
 pub fn open(e: *Editor, file_name: []const u8) !void {
     // TODO: WHAT?!?!?
-    var flog = std.fs.cwd().openFile(file_name, .{ .mode = .read_write }) catch
-        try std.fs.cwd().createFile(file_name, .{ .read = true });
-
-    defer flog.close();
+    const cwd = std.fs.cwd();
+    var file = cwd.openFile(file_name, .{ .mode = .read_write }) catch |err| switch (err) {
+        error.FileNotFound => try cwd.createFile(file_name, .{}),
+        else => return err,
+    };
+    defer file.close();
 
     // BUG:
     var buf: [1024]u8 = undefined;
     while (true) {
         // TODO: fix this issue
         // const line = try e.flog.?.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
-        const line = try flog.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
+        const line = try file.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
         try e.insertRow(e.numOfRows(), line);
     }
 
@@ -141,15 +143,8 @@ fn toString(e: *Editor) ![]const u8 {
 }
 
 fn save(e: *Editor) !void {
-    var delete = true;
-
     if (e.file_name.len == 0) {
-        // BUG: LEAK
-        e.file_name = try e.prompt("Save as: {s}") orelse {
-            return try e.setStatusMsg("Error: Cannot write", .{});
-        };
-        allocname = true;
-        delete = false;
+        return try e.setStatusMsg("Error: Cannot write", .{});
     }
 
     if (e.file_status == 0) {
@@ -157,9 +152,13 @@ fn save(e: *Editor) !void {
     }
 
     const cwd = std.fs.cwd();
-    if (delete) try cwd.deleteFile(e.file_name);
-
-    var file = try cwd.createFile(e.file_name, .{});
+    cwd.deleteFile(e.file_name) catch {};
+    var file = cwd.createFile(e.file_name, .{}) catch |err| switch (err) {
+        error.FileNotFound,
+        error.PathAlreadyExists,
+        => try cwd.openFile(e.file_name, .{ .mode = .write_only }),
+        else => return err,
+    };
     defer file.close();
 
     const rows = try e.toString();
@@ -176,11 +175,43 @@ pub fn processKeyPressed(e: *Editor) !bool {
     return switch (e.mode) {
         .insert => try e.processKeyPressedInsertMode(),
         .normal => try e.processKeyPressedNormalMode(),
-        // TODO:
+        .command => try e.processKeyPressedCommandMode(),
         .visual => true,
     };
 }
 
+fn processKeyPressedCommandMode(e: *Editor) !bool {
+    defer e.mode = .normal;
+
+    const command = try e.prompt(":{s}") orelse {
+        return false;
+    };
+    defer e.alloc.free(command);
+
+    const cmd = std.mem.trim(u8, command, " ");
+
+    if (std.mem.eql(u8, cmd, "help")) {
+        try e.setStatusMsg("help not available", .{});
+        return false;
+    }
+
+    if (std.mem.eql(u8, cmd, "w")) {
+        try e.save();
+        return false;
+    }
+
+    if (std.mem.startsWith(u8, cmd, "w ")) {
+        if (allocname) {
+            e.alloc.free(e.file_name);
+            allocname = false;
+        }
+        e.file_name = cmd[2..];
+        try e.save();
+        return false;
+    }
+
+    return false;
+}
 /// handles the keypress
 fn processKeyPressedInsertMode(e: *Editor) !bool {
     const key = try readKey();
@@ -252,8 +283,6 @@ fn processKeyPressedNormalMode(e: *Editor) !bool {
     switch (key_tag) {
         .ENTER => try e.insertNewLine(),
 
-        CTRL_S => try e.save(),
-
         CTRL_Z => {
             _ = try stdout.write("\x1b[2J");
             _ = try stdout.write("\x1b[H");
@@ -299,11 +328,11 @@ fn processKeyPressedNormalMode(e: *Editor) !bool {
             e.cursor.x = chars.len;
         },
 
-        else => if (key < 128) {
-            if (key == 'i') {
-                e.mode = .insert;
-            }
-        },
+        asKey('i') => e.mode = .insert,
+
+        asKey(':') => e.mode = .command,
+
+        else => {},
     }
 
     return false;
@@ -736,6 +765,10 @@ fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
             '\x1b' => {
                 try e.setStatusMsg("", .{});
                 return null;
+            },
+
+            127 => {
+                _ = input.pop();
             },
 
             '\r' => if (input.items.len != 0) {

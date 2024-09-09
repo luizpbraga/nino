@@ -226,10 +226,11 @@ fn cuy(e: *Editor) usize {
 /// covert char index to render index
 /// not working, i think
 fn cx2rx(e: *Editor) usize {
-    var rx: usize = 0;
+    const tab = TABSTOP - 1;
     const chars = e.row.items[e.cursor.y].chars.items;
+    var rx: usize = 0;
     for (chars[0..e.cursor.x]) |c| {
-        if (c == '\t') rx += (TABSTOP - 1) - (rx & TABSTOP);
+        if (c == '\t') rx += tab - (rx % TABSTOP);
         rx += 1;
     }
     return rx;
@@ -247,21 +248,21 @@ fn updateRow(_: *Editor, row: *Row) !void {
     row.render.clearAndFree();
     try row.render.resize(row.chars.items.len + tabs * (TABSTOP - 1));
     {
-        var i: usize = 0;
+        var idx: usize = 0;
         for (row.chars.items, 0..) |char, j| {
             if (char != '\t') {
-                row.render.items[i] = row.chars.items[j];
-                i += 1;
+                row.render.items[idx] = row.chars.items[j];
+                idx += 1;
                 continue;
             }
             // handles \t
-            row.render.items[i] = ' ';
-            i += 1;
-            while (i % 8 != 0) : (i += 1) {
-                row.render.items[i] = ' ';
+            row.render.items[idx] = ' ';
+            idx += 1;
+            while (idx % 8 != 0) : (idx += 1) {
+                row.render.items[idx] = ' ';
             }
         }
-        try std.testing.expect(i == row.render.items.len);
+        try row.render.resize(idx);
     }
 }
 

@@ -95,7 +95,7 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
         // TODO: fix this issue
         // const line = try e.flog.?.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
         const line = try flog.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
-        try e.appendRow(line);
+        try e.insertRow(e.numOfRows(), line);
     }
 
     e.file_name = file_name;
@@ -112,7 +112,7 @@ pub fn deinit(e: *Editor) void {
     e.buffer.deinit();
 }
 
-fn atRow(e: *Editor, at: usize) *Row {
+fn rowAt(e: *Editor, at: usize) *Row {
     return e.row.items[at];
 }
 
@@ -157,10 +157,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
     const key_tag: Key = @enumFromInt(key);
 
     switch (key_tag) {
-        .ENTER => {
-            e.cursor.x = 0;
-            e.cursor.y += 1;
-        },
+        .ENTER => try e.insertNewLine(),
 
         // '\x1b', CTRL_L => {},
 
@@ -216,6 +213,14 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
 fn controlKey(c: usize) Key {
     return @enumFromInt(c & 0x1f);
+}
+
+fn cux(e: *Editor) usize {
+    return e.cursor.x;
+}
+
+fn cuy(e: *Editor) usize {
+    return e.cursor.y;
 }
 
 /// covert char index to render index
@@ -505,60 +510,88 @@ fn readKey() !usize {
 }
 
 /// create and collect a new row
-fn createRow(e: *Editor) !*Row {
+fn createRow(e: *Editor, at: usize) !*Row {
     var row = try e.alloc.create(Row);
     row.chars = .init(e.alloc);
     row.render = .init(e.alloc);
-    try e.row.append(row);
+    try e.row.insert(at, row);
     return row;
 }
 
 /// adds a new row and render
-fn appendRow(e: *Editor, chars: []u8) !void {
-    var row = try e.createRow();
+fn insertRow(e: *Editor, at: usize, chars: []u8) !void {
+    defer e.file_status += 1;
+    if (at > e.numOfRows()) return;
+    var row = try e.createRow(at);
     try row.chars.appendSlice(chars);
     try e.updateRow(row);
-    e.file_status += 1;
+}
+// fn insertRow(e: *Editor, chars: []u8) !void {
+//     var row = try e.createRow();
+//     try row.chars.appendSlice(chars);
+//     try e.updateRow(row);
+//     e.file_status += 1;
+// }
+
+fn insertNewLine(e: *Editor) !void {
+    defer {
+        e.cursor.y += 1;
+        e.cursor.x = 0;
+    }
+
+    if (e.cursor.x == 0) {
+        try e.insertRow(e.cursor.y, "");
+        return;
+    }
+
+    var row = e.row.items[e.cursor.y];
+    const chars = row.chars.items;
+    try e.insertRow(e.cursor.y + 1, chars[e.cursor.x..]);
+    row = e.row.items[e.cursor.y];
+    try row.chars.resize(e.cursor.x);
+    try e.updateRow(row);
 }
 
 ///inserts a single character into an row, at the current (x, y) cursor
 /// position.
-fn rowInsertChar(e: *Editor, char: u8) !void {
-    const len = e.row.items[e.cursor.y].chars.items.len;
-    const cx = if (e.cursor.x > len) len else e.cursor.x;
-    try e.row.items[e.cursor.y].chars.insert(cx, char);
-    try e.updateRow(e.row.items[e.cursor.y]);
-    e.file_status += 1;
+fn rowInsertChar(e: *Editor, row: *Row, at: usize, char: u8) !void {
+    defer e.file_status += 1;
+    const len = row.charsLen();
+    const cx = if (e.cursor.x > len) len else at;
+    try row.chars.insert(cx, char);
+    try e.updateRow(row);
 }
 
 fn insertChar(e: *Editor, key: u8) !void {
+    defer e.cursor.x += 1;
     if (e.cursor.y == e.numOfRows()) {
-        try e.appendRow("");
+        try e.insertRow(e.numOfRows(), "");
     }
-    try e.rowInsertChar(key);
-    e.cursor.x += 1;
+    const row = e.rowAt(e.cursor.y);
+    try e.rowInsertChar(row, e.cursor.x, key);
 }
 
 ///deletes a single character into an row, at the current (x, y) cursor
 /// position.
-fn rowDeleteChar(e: *Editor) !void {
-    const len = e.row.items[e.cursor.y].chars.items.len;
-    const cx = if (e.cursor.x > len) return else e.cursor.x - 1;
-    _ = e.row.items[e.cursor.y].chars.orderedRemove(cx);
-    try e.updateRow(e.row.items[e.cursor.y]);
+fn rowDeleteChar(e: *Editor, row: *Row, at: usize) !void {
+    const len = row.charsLen();
+    const cx = if (e.cursor.x >= len) return else at;
+    _ = row.chars.orderedRemove(cx);
+    try e.updateRow(row);
     e.file_status += 1;
 }
 
-fn freeRow(e: *Editor) void {
-    var row = e.row.items[e.cursor.y];
-    defer e.alloc.destroy(row);
+fn freeRow(e: *Editor, row: *Row) void {
     row.chars.deinit();
     row.render.deinit();
     _ = e.row.orderedRemove(e.cursor.y);
 }
 
-fn deleteRow(e: *Editor) void {
-    e.freeRow();
+fn deleteRow(e: *Editor, at: usize) void {
+    if (at >= e.numOfRows()) return;
+    const row = e.rowAt(at);
+    defer e.alloc.destroy(row);
+    e.freeRow(row);
     e.file_status += 1;
 }
 
@@ -566,22 +599,23 @@ fn deleteChar(e: *Editor) !void {
     if (e.cursor.y == e.numOfRows()) return;
     if (e.cursor.y == 0 and e.cursor.x == 0) return;
 
+    const row = e.rowAt(e.cursor.y);
     if (e.cursor.x > 0) {
-        try e.rowDeleteChar();
+        try e.rowDeleteChar(row, e.cursor.x - 1);
         e.cursor.x -= 1;
         return;
     }
 
     // handle appending to the prev. line
-    e.cursor.x = e.row.items[e.cursor.y - 1].charsLen();
-    try e.rowAppendString(e.row.items[e.cursor.y - 1]);
-    e.deleteRow();
+    const last_row = e.rowAt(e.cursor.y - 1);
+    e.cursor.x = last_row.charsLen();
+    try e.rowAppendString(last_row, row.chars.items);
+    e.deleteRow(e.cursor.y);
     e.cursor.y -= 1;
 }
 
-fn rowAppendString(e: *Editor, prevrow: *Row) !void {
-    const currrow = e.row.items[e.cursor.y];
-    try prevrow.chars.appendSlice(currrow.chars.items);
-    try e.updateRow(prevrow);
-    e.file_status += 1;
+fn rowAppendString(e: *Editor, row: *Row, string: []const u8) !void {
+    defer e.file_status += 1;
+    try row.chars.appendSlice(string);
+    try e.updateRow(row);
 }

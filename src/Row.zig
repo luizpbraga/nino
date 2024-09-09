@@ -11,7 +11,7 @@ pub fn asChars(r: *Row) []u8 {
 }
 
 pub fn asRender(r: *Row) []u8 {
-    return r.chars.items;
+    return r.render.items;
 }
 
 pub fn renderLen(r: *Row) usize {

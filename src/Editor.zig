@@ -575,9 +575,8 @@ fn insertChar(e: *Editor, key: u8) !void {
 ///deletes a single character into an row, at the current (x, y) cursor
 /// position.
 fn rowDeleteChar(e: *Editor, row: *Row, at: usize) !void {
-    const len = row.charsLen();
-    const cx = if (e.cursor.x >= len) return else at;
-    _ = row.chars.orderedRemove(cx);
+    if (at >= row.charsLen()) return;
+    _ = row.chars.orderedRemove(at);
     try e.updateRow(row);
     e.file_status += 1;
 }

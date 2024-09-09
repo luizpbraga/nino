@@ -16,7 +16,7 @@ const CTRL_L = controlKey('l');
 const CTRL_H = controlKey('h');
 const CTRL_S = controlKey('s');
 
-const TABSTOP = 8;
+const TABSTOP = 4;
 const STATUSBAR = 2;
 
 /// 2d point Coordinate
@@ -184,17 +184,21 @@ pub fn processKeyPressed(e: *Editor) !bool {
 
         .PAGE_UP, .PAGE_DOWN => |c| {
             // positioning the cursor to the end/begin
-            switch (c) {
-                .PAGE_UP => e.cursor.y = e.offset.y,
+            const k: Key = switch (c) {
+                .PAGE_UP => b: {
+                    e.cursor.y = e.offset.y;
+                    break :b .ARROW_UP;
+                },
 
-                .PAGE_DOWN => {
+                .PAGE_DOWN => b: {
                     e.cursor.y = e.offset.y + e.screen.y - 1;
                     if (e.cursor.y > e.numOfRows()) e.cursor.y = e.numOfRows();
+                    break :b .ARROW_DOWN;
                 },
-                else => {},
-            }
 
-            const k: Key = if (key_tag == .PAGE_UP) .ARROW_UP else .ARROW_DOWN;
+                else => unreachable,
+            };
+
             var times = e.screen.y;
             while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
         },
@@ -205,6 +209,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
             const chars = e.row.items[e.cursor.y].chars.items;
             e.cursor.x = chars.len;
         },
+
         else => if (key < 128) try e.insertChar(@intCast(key)),
     }
 
@@ -618,4 +623,24 @@ fn rowAppendString(e: *Editor, row: *Row, string: []const u8) !void {
     defer e.file_status += 1;
     try row.chars.appendSlice(string);
     try e.updateRow(row);
+}
+
+/// prompting the user input
+fn prompt(e: *Editor) ![128]u8 {
+    var buf: [128]u8 = undefined;
+    @memset(&buf, 0);
+
+    while (true) {
+        try e.setStatusMsg("{s}", .{buf});
+        try e.refreshScreen();
+
+        switch (try e.readKey()) {
+            '\r' => {
+                return buf;
+            },
+            else => |c| {
+                _ = c; // autofix
+            },
+        }
+    }
 }

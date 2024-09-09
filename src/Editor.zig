@@ -16,6 +16,8 @@ const CTRL_L = controlKey('l');
 const CTRL_H = controlKey('h');
 const CTRL_S = controlKey('s');
 
+var LEFTSPACE: usize = 3;
+var NUMBERS = true;
 var TABSTOP: usize = 4;
 var STATUSBAR: usize = 2;
 var allocname = false;
@@ -172,8 +174,9 @@ fn save(e: *Editor) !void {
 
 pub fn processKeyPressed(e: *Editor) !bool {
     return switch (e.mode) {
-        .normal => try e.processKeyPressedInsertMode(),
         .insert => try e.processKeyPressedInsertMode(),
+        .normal => try e.processKeyPressedNormalMode(),
+        // TODO:
         .visual => true,
     };
 }
@@ -186,11 +189,10 @@ fn processKeyPressedInsertMode(e: *Editor) !bool {
     switch (key_tag) {
         .ENTER => try e.insertNewLine(),
 
-        // '\x1b', CTRL_L => {},
-
-        CTRL_S => try e.save(),
+        .ESC => e.mode = .normal,
 
         .BACKSPACE, CTRL_H => try e.deleteChar(),
+
         .DEL => {
             e.moveCursor(@intFromEnum(Key.ARROW_RIGHT));
             try e.deleteChar();
@@ -243,8 +245,76 @@ fn processKeyPressedInsertMode(e: *Editor) !bool {
     return false;
 }
 
+fn processKeyPressedNormalMode(e: *Editor) !bool {
+    const key = try readKey();
+    const key_tag: Key = @enumFromInt(key);
+
+    switch (key_tag) {
+        .ENTER => try e.insertNewLine(),
+
+        CTRL_S => try e.save(),
+
+        CTRL_Z => {
+            _ = try stdout.write("\x1b[2J");
+            _ = try stdout.write("\x1b[H");
+            return true;
+        },
+
+        // cursor movement keys
+        .ARROW_UP,
+        .ARROW_DOWN,
+        .ARROW_RIGHT,
+        .ARROW_LEFT,
+        asKey('h'),
+        asKey('j'),
+        asKey('k'),
+        asKey('l'),
+        => e.moveCursor(key),
+
+        .PAGE_UP, .PAGE_DOWN => |c| {
+            // positioning the cursor to the end/begin
+            const k: Key = switch (c) {
+                .PAGE_UP => b: {
+                    e.cursor.y = e.offset.y;
+                    break :b .ARROW_UP;
+                },
+
+                .PAGE_DOWN => b: {
+                    e.cursor.y = e.offset.y + e.screen.y - 1;
+                    if (e.cursor.y > e.numOfRows()) e.cursor.y = e.numOfRows();
+                    break :b .ARROW_DOWN;
+                },
+
+                else => unreachable,
+            };
+
+            var times = e.screen.y;
+            while (times != 0) : (times -= 1) e.moveCursor(@intFromEnum(k));
+        },
+
+        .HOME => e.cursor.x = 0,
+
+        .END => if (e.cursor.y < e.numOfRows()) {
+            const chars = e.row.items[e.cursor.y].chars.items;
+            e.cursor.x = chars.len;
+        },
+
+        else => if (key < 128) {
+            if (key == 'i') {
+                e.mode = .insert;
+            }
+        },
+    }
+
+    return false;
+}
+
 fn controlKey(c: usize) Key {
     return @enumFromInt(c & 0x1f);
+}
+
+fn asKey(c: usize) Key {
+    return @enumFromInt(c);
 }
 
 fn cux(e: *Editor) usize {
@@ -379,7 +449,7 @@ fn drawStatusBar(e: *Editor) !void {
     var llen = b: {
         const modified = if (e.file_status == 0) "" else "[+]";
         const file_name = if (e.file_name.len == 0) "[NO NAME]" else e.file_name;
-        const buf = try std.fmt.bufPrint(&lstatus, " {s} {s}", .{ file_name, modified });
+        const buf = try std.fmt.bufPrint(&lstatus, "{s}> {s} {s}", .{ @tagName(e.mode), file_name, modified });
         break :b if (buf.len > e.screen.x) e.screen.x else buf.len;
     };
 
@@ -418,7 +488,6 @@ fn drawRows(e: *Editor) !void {
                 try e.buffer.append('~');
             }
         } else {
-            // const renders = e.render.items[file_row];
             const renders = e.row.items[file_row].render.items;
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
             if (len > e.screen.x) len = e.screen.x;
@@ -447,25 +516,25 @@ fn moveCursor(e: *Editor, key: usize) void {
     const key_tag: Key = @enumFromInt(key);
 
     switch (key_tag) {
-        .ARROW_LEFT => if (e.cursor.x != 0) {
+        asKey('h'), .ARROW_LEFT => if (e.cursor.x != 0) {
             e.cursor.x -= 1;
         },
 
         // bound the cursor to the actual string size
-        .ARROW_RIGHT => if (maybe_cur_row) |cur_row| {
+        asKey('l'), .ARROW_RIGHT => if (maybe_cur_row) |cur_row| {
             if (e.cursor.x < cur_row.len) e.cursor.x += 1;
         },
 
-        .ARROW_UP => if (e.cursor.y != 0) {
+        asKey('k'), .ARROW_UP => if (e.cursor.y != 0) {
             e.cursor.y -= 1;
         },
 
         // scroll logic
-        .ARROW_DOWN => if (e.cursor.y < e.numOfRows()) {
+        asKey('j'), .ARROW_DOWN => if (e.cursor.y < e.numOfRows()) {
             e.cursor.y += 1;
         },
 
-        else => {},
+        else => unreachable,
     }
 
     // snap cursor to end of line (move to end)

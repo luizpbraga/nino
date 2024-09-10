@@ -648,36 +648,24 @@ fn moveCursor(e: *Editor, key: usize) void {
 /// wait for one keypress, and return it.
 fn readKey() !usize {
     var buff: [1]u8 = .{'0'};
-    // POR QUE CARALHOS ESSE LOOP !? HEIM?! FODA SE O CAPTALISMO
+
     while (try stdin.read(&buff) != 1) {}
-    const key = buff[0];
 
-    if (key != '\x1b') {
-        return key;
-    }
+    if (buff[0] != '\x1b') return buff[0];
 
-    // handle escape sequence
-    var seq: [6]u8 = blk: {
-        var s0: [1]u8 = .{0};
-        if (try stdin.read(&s0) != 1) return '\x1b';
+    // escape sequence buffer
+    var seq: [5]u8 = undefined;
+    @memset(&seq, 0);
 
-        var s1: [1]u8 = .{0};
-        if (try stdin.read(&s1) != 1) return '\x1b';
-
-        break :blk .{ s0[0], s1[0], 0, 0, 0, 0 };
-    };
+    if (try stdin.read(seq[0..1]) != 1) return '\x1b';
+    if (try stdin.read(seq[1..2]) != 1) return '\x1b';
 
     // NOT PAGE_{UP, DOWN} or ARROW_{UP, DOWN, ...}, MOUSE
     if (seq[0] == '[') {
         // PAGE_UP AND DOWN
         // page Up is sent as <esc>[5~ and Page Down is sent as <esc>[6~.
         if (seq[1] >= '0' and seq[1] <= '9') {
-            seq[2] = blk: {
-                var s2: [1]u8 = .{0};
-                if (try stdin.read(&s2) != 1) return '\x1b';
-                break :blk s2[0];
-            };
-
+            if (try stdin.read(seq[2..3]) != 1) return '\x1b';
             if (seq[2] == '~') switch (seq[1]) {
                 '1', '7' => return @intFromEnum(Key.HOME),
                 '4', '8' => return @intFromEnum(Key.END),
@@ -699,43 +687,22 @@ fn readKey() !usize {
             'D' => return @intFromEnum(Key.ARROW_LEFT),
             'H' => return @intFromEnum(Key.HOME),
             'F' => return @intFromEnum(Key.END),
+            // MOUSE
             'M' => {
-                // MOUSE
-                seq[2] = blk: {
-                    var s2: [1]u8 = .{0};
-                    if (try stdin.read(&s2) != 1) return '\x1b';
-                    break :blk s2[0];
-                };
+                if (try stdin.read(seq[2..3]) != 1) return '\x1b';
 
                 const button = seq[2] - 32;
-
                 // scrool up
-                if (button == 64) {
-                    return @intFromEnum(Key.ARROW_UP);
-                }
-
+                if (button == 64) return @intFromEnum(Key.ARROW_UP);
                 // scrool down
-                if (button == 65) {
-                    return @intFromEnum(Key.ARROW_DOWN);
-                }
-
-                seq[3] = blk: {
-                    var s3: [1]u8 = .{0};
-                    if (try stdin.read(&s3) != 1) return '\x1b';
-                    break :blk s3[0];
-                };
-
-                seq[4] = blk: {
-                    var s4: [1]u8 = .{0};
-                    if (try stdin.read(&s4) != 1) return '\x1b';
-                    break :blk s4[0];
-                };
-
-                const x = seq[3] - 32;
-                const y = seq[4] - 32;
-
+                if (button == 65) return @intFromEnum(Key.ARROW_DOWN);
+                // mouse Coordinates
+                if (try stdin.read(seq[3..4]) != 1) return '\x1b';
+                if (try stdin.read(seq[4..5]) != 1) return '\x1b';
                 // left button
                 if (button == 0) {
+                    const x = seq[3] - 32;
+                    const y = seq[4] - 32;
                     // TODO: use unions
                     MOUSECOORD = .{ .x = x, .y = y };
                     return @intFromEnum(Key.MOUSE);

@@ -16,20 +16,23 @@ const CTRL_L = controlKey('l');
 const CTRL_H = controlKey('h');
 const CTRL_S = controlKey('s');
 
-// hightlight
+// highlight
 //https://pygments.org/
 var LEFTSPACE: usize = 0;
-var SETNUMBER = true;
+var SETNUMBER = false;
 var NUMBERS = true;
 var TABSTOP: usize = 4;
 var STATUSBAR: usize = 2;
 var ALLOCNAME = false;
+/// SORRY ABOUT THIS
+var MOUSECOORD: Coordinate = .{};
 
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 const Key = enum(usize) {
+    MOUSE,
     ENTER = '\r',
     ESC = '\x1b',
     BACKSPACE = 127,
@@ -242,12 +245,12 @@ fn exit() !void {
     try stdout.writeAll("\x1b[2J\x1b[H");
 }
 
-fn enableMouse() !void {
-    try stdout.writeAll("\x1b[?1000h");
+pub fn enableMouse() !void {
+    try stdout.writeAll("\x1b[?1003h");
 }
 
-fn disableMouse() !void {
-    try stdout.writeAll("\x1b[?1000l");
+pub fn disableMouse() !void {
+    try stdout.writeAll("\x1b[?1003l");
 }
 
 /// handles the keypress
@@ -318,6 +321,19 @@ fn processKeyPressedNormalMode(e: *Editor) !bool {
         CTRL_Z => {
             try exit();
             return true;
+        },
+
+        .MOUSE => {
+            const mx = MOUSECOORD.x;
+            const my = MOUSECOORD.y;
+            e.cursor.y = if (my > e.numOfRows()) e.numOfRows() else my + e.offset.y - 1;
+            const row = e.rowAt(e.cursor.y);
+
+            if (row.charsLen() == 0 or mx == 0) {
+                e.cursor.x = e.offset.x;
+            } else {
+                e.cursor.x = if (mx > row.charsLen()) row.charsLen() - 1 else mx + e.offset.x - 1;
+            }
         },
 
         // cursor movement keys
@@ -641,17 +657,17 @@ fn readKey() !usize {
     }
 
     // handle escape sequence
-    var seq: [3]u8 = blk: {
+    var seq: [6]u8 = blk: {
         var s0: [1]u8 = .{0};
         if (try stdin.read(&s0) != 1) return '\x1b';
 
         var s1: [1]u8 = .{0};
         if (try stdin.read(&s1) != 1) return '\x1b';
 
-        break :blk .{ s0[0], s1[0], 0 };
+        break :blk .{ s0[0], s1[0], 0, 0, 0, 0 };
     };
 
-    // NOT PAGE_{UP, DOWN} or ARROW_{UP, DOWN, ...}
+    // NOT PAGE_{UP, DOWN} or ARROW_{UP, DOWN, ...}, MOUSE
     if (seq[0] == '[') {
         // PAGE_UP AND DOWN
         // page Up is sent as <esc>[5~ and Page Down is sent as <esc>[6~.
@@ -683,6 +699,50 @@ fn readKey() !usize {
             'D' => return @intFromEnum(Key.ARROW_LEFT),
             'H' => return @intFromEnum(Key.HOME),
             'F' => return @intFromEnum(Key.END),
+            'M' => {
+                // MOUSE
+                seq[2] = blk: {
+                    var s2: [1]u8 = .{0};
+                    if (try stdin.read(&s2) != 1) return '\x1b';
+                    break :blk s2[0];
+                };
+
+                const button = seq[2] - 32;
+
+                // scrool up
+                if (button == 64) {
+                    return @intFromEnum(Key.ARROW_UP);
+                }
+
+                // scrool down
+                if (button == 65) {
+                    return @intFromEnum(Key.ARROW_DOWN);
+                }
+
+                seq[3] = blk: {
+                    var s3: [1]u8 = .{0};
+                    if (try stdin.read(&s3) != 1) return '\x1b';
+                    break :blk s3[0];
+                };
+
+                seq[4] = blk: {
+                    var s4: [1]u8 = .{0};
+                    if (try stdin.read(&s4) != 1) return '\x1b';
+                    break :blk s4[0];
+                };
+
+                const x = seq[3] - 32;
+                const y = seq[4] - 32;
+
+                // left button
+                if (button == 0) {
+                    // TODO: use unions
+                    MOUSECOORD = .{ .x = x, .y = y };
+                    return @intFromEnum(Key.MOUSE);
+                }
+
+                return '\x1b';
+            },
             else => {},
         }
     }

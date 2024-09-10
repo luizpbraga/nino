@@ -29,10 +29,14 @@ pub fn main() !void {
     try Terminal.initRawMode(&edi);
     defer Terminal.deinitRawMode(&edi);
 
+    try Editor.enableMouse();
+
     while (true) {
         try edi.refreshScreen();
         if (try edi.processKeyPressed()) break;
     }
+
+    try Editor.disableMouse();
 }
 
 test "simple test" {

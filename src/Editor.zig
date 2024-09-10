@@ -32,7 +32,6 @@ const Coordinate = struct { x: usize = 0, y: usize = 0 };
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 const Key = enum(usize) {
-    MOUSE,
     ENTER = '\r',
     ESC = '\x1b',
     BACKSPACE = 127,
@@ -45,6 +44,7 @@ const Key = enum(usize) {
     END,
     PAGE_UP,
     PAGE_DOWN,
+    MOUSE,
     _,
 };
 
@@ -200,7 +200,7 @@ fn processKeyPressedCommandMode(e: *Editor) !bool {
         return false;
     }
 
-    if (std.mem.eql(u8, cmd, "q")) {
+    if (std.mem.eql(u8, cmd, "q") or std.mem.eql(u8, cmd, "quit")) {
         if (e.file_status == 0) {
             try exit();
             return true;
@@ -332,7 +332,7 @@ fn processKeyPressedNormalMode(e: *Editor) !bool {
             if (row.charsLen() == 0 or mx == 0) {
                 e.cursor.x = e.offset.x;
             } else {
-                e.cursor.x = if (mx > row.charsLen()) row.charsLen() - 1 else mx + e.offset.x - 1;
+                e.cursor.x = if (mx > row.charsLen()) row.charsLen() else mx + e.offset.x - 1;
             }
         },
 

@@ -16,6 +16,8 @@ const CTRL_L = controlKey('l');
 const CTRL_H = controlKey('h');
 const CTRL_S = controlKey('s');
 
+// hightlight
+//https://pygments.org/
 var LEFTSPACE: usize = 3;
 var NUMBERS = true;
 var TABSTOP: usize = 4;
@@ -88,7 +90,6 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 
 /// read the file rows
 pub fn open(e: *Editor, file_name: []const u8) !void {
-    // TODO: WHAT?!?!?
     const cwd = std.fs.cwd();
     var file = cwd.openFile(file_name, .{ .mode = .read_write }) catch |err| switch (err) {
         error.FileNotFound => try cwd.createFile(file_name, .{}),
@@ -195,23 +196,50 @@ fn processKeyPressedCommandMode(e: *Editor) !bool {
         return false;
     }
 
+    if (std.mem.eql(u8, cmd, "q")) {
+        if (e.file_status == 0) {
+            try exit();
+            return true;
+        }
+        try e.setStatusMsg("Warn: unsaved changes. Use ':q!' to force quit", .{});
+        return false;
+    }
+
+    if (std.mem.eql(u8, cmd, "q!")) {
+        try exit();
+        return true;
+    }
+
     if (std.mem.eql(u8, cmd, "w")) {
         try e.save();
         return false;
     }
 
+    // BUG: fix file overwriting
     if (std.mem.startsWith(u8, cmd, "w ")) {
         if (allocname) {
             e.alloc.free(e.file_name);
             allocname = false;
         }
-        e.file_name = cmd[2..];
+
+        const name = cmd[2..];
+        const newname = try e.alloc.alloc(u8, name.len);
+
+        @memcpy(newname, name);
+        e.file_name = newname;
+        allocname = true;
+
         try e.save();
         return false;
     }
 
     return false;
 }
+
+fn exit() !void {
+    _ = try stdout.write("\x1b[2J\x1b[H");
+}
+
 /// handles the keypress
 fn processKeyPressedInsertMode(e: *Editor) !bool {
     const key = try readKey();
@@ -230,8 +258,7 @@ fn processKeyPressedInsertMode(e: *Editor) !bool {
         },
 
         CTRL_Z => {
-            _ = try stdout.write("\x1b[2J");
-            _ = try stdout.write("\x1b[H");
+            try exit();
             return true;
         },
 
@@ -430,6 +457,36 @@ pub fn refreshScreen(e: *Editor) !void {
     _ = try stdout.write(e.buffer.items);
 }
 
+pub fn refreshPrompt(e: *Editor) !void {
+    defer e.buffer.clearAndFree();
+
+    // e.scroll();
+
+    // hide the cursor
+    try e.buffer.appendSlice("\x1b[?25l");
+    // clear all [2J:
+    // try edi.buffer.appendSlice("\x1b[2J"); // let's use \x1b[K instead
+    // reposition the cursor at the top-left corner; H command (Cursor Position)
+    try e.buffer.appendSlice("\x1b[H");
+
+    // try e.getWindowSize();
+    try e.drawRows();
+    try e.drawStatusBar();
+    try e.drawMsgBar();
+
+    // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
+    // move the cursor
+    // e.cursor.y now referees to the position of the cursor within file
+    try e.buffer.writer().print("\x1b[{};{}H", .{
+        e.screen.y + TABSTOP,
+        e.cursor.x + 1,
+    });
+
+    // show the cursor
+    try e.buffer.appendSlice("\x1b[?25h");
+    _ = try stdout.write(e.buffer.items);
+}
+
 /// TODO: Window size, the hard way
 fn getWindowSize(e: *Editor) !void {
     var ws: std.posix.winsize = undefined;
@@ -498,8 +555,7 @@ fn drawStatusBar(e: *Editor) !void {
         try e.buffer.append(' ');
     }
     // reswitch colors
-    try e.buffer.appendSlice("\x1b[m");
-    try e.buffer.appendSlice("\r\n");
+    try e.buffer.appendSlice("\x1b[0m\r\n");
 }
 
 /// draw a column of (~) on the left hand side at the beginning of any line til EOF
@@ -657,12 +713,6 @@ fn insertRow(e: *Editor, at: usize, chars: []u8) !void {
     try row.chars.appendSlice(chars);
     try e.updateRow(row);
 }
-// fn insertRow(e: *Editor, chars: []u8) !void {
-//     var row = try e.createRow();
-//     try row.chars.appendSlice(chars);
-//     try e.updateRow(row);
-//     e.file_status += 1;
-// }
 
 fn insertNewLine(e: *Editor) !void {
     defer {
@@ -751,15 +801,25 @@ fn rowAppendString(e: *Editor, row: *Row, string: []const u8) !void {
 }
 
 /// displays a prompt in the status bar & and lets the user input a line
-/// afther the prompt
-/// callow own the memmory
+/// after the prompt
+/// callow own the memory
+/// TODO: make prompt and command diff things
 fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
     var input: std.ArrayList(u8) = .init(e.alloc);
     defer input.deinit();
+    const prev_cursor = e.cursor;
+    defer {
+        e.cursor.x = prev_cursor.x;
+        e.cursor.y = prev_cursor.y;
+        e.cursor.rx = prev_cursor.rx;
+    }
+
+    e.cursor.rx = 0;
+    e.cursor.x = 1;
 
     while (true) {
         try e.setStatusMsg(prompt_fmt, .{input.items});
-        try e.refreshScreen();
+        try e.refreshPrompt();
 
         switch (try readKey()) {
             '\x1b' => {
@@ -768,7 +828,10 @@ fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
             },
 
             127 => {
-                _ = input.pop();
+                if (input.items.len != 0) {
+                    _ = input.pop();
+                    e.cursor.x -= 1;
+                }
             },
 
             '\r' => if (input.items.len != 0) {
@@ -778,6 +841,7 @@ fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
 
             else => |c| if (c >= 0 and c < 128) {
                 try input.append(@intCast(c));
+                e.cursor.x += 1;
             },
         }
     }

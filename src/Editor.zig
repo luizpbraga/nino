@@ -18,11 +18,12 @@ const CTRL_S = controlKey('s');
 
 // hightlight
 //https://pygments.org/
-var LEFTSPACE: usize = 3;
+var LEFTSPACE: usize = 0;
+var SETNUMBER = true;
 var NUMBERS = true;
 var TABSTOP: usize = 4;
 var STATUSBAR: usize = 2;
-var allocname = false;
+var ALLOCNAME = false;
 
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
@@ -65,7 +66,7 @@ row: std.ArrayList(*Row),
 /// file status (TODO)
 file_status: usize = 0,
 /// mode
-mode: enum { normal, insert, visual, command } = .insert,
+mode: enum { normal, insert, visual, command } = .normal,
 
 /// Read the current terminal attributes into raw
 /// and save the terminal state
@@ -118,7 +119,7 @@ pub fn deinit(e: *Editor) void {
     }
     e.row.deinit();
     e.buffer.deinit();
-    if (allocname) e.alloc.free(e.file_name);
+    if (ALLOCNAME) e.alloc.free(e.file_name);
 }
 
 fn rowAt(e: *Editor, at: usize) *Row {
@@ -217,9 +218,9 @@ fn processKeyPressedCommandMode(e: *Editor) !bool {
 
     // BUG: fix file overwriting
     if (std.mem.startsWith(u8, cmd, "w ")) {
-        if (allocname) {
+        if (ALLOCNAME) {
             e.alloc.free(e.file_name);
-            allocname = false;
+            ALLOCNAME = false;
         }
 
         const name = cmd[2..];
@@ -227,17 +228,26 @@ fn processKeyPressedCommandMode(e: *Editor) !bool {
 
         @memcpy(newname, name);
         e.file_name = newname;
-        allocname = true;
+        ALLOCNAME = true;
 
         try e.save();
         return false;
     }
 
+    try e.setStatusMsg("Not an editor command: {s}", .{cmd});
     return false;
 }
 
 fn exit() !void {
-    _ = try stdout.write("\x1b[2J\x1b[H");
+    try stdout.writeAll("\x1b[2J\x1b[H");
+}
+
+fn enableMouse() !void {
+    try stdout.writeAll("\x1b[?1000h");
+}
+
+fn disableMouse() !void {
+    try stdout.writeAll("\x1b[?1000l");
 }
 
 /// handles the keypress
@@ -255,11 +265,6 @@ fn processKeyPressedInsertMode(e: *Editor) !bool {
         .DEL => {
             e.moveCursor(@intFromEnum(Key.ARROW_RIGHT));
             try e.deleteChar();
-        },
-
-        CTRL_Z => {
-            try exit();
-            return true;
         },
 
         // cursor movement keys
@@ -311,8 +316,7 @@ fn processKeyPressedNormalMode(e: *Editor) !bool {
         .ENTER => try e.insertNewLine(),
 
         CTRL_Z => {
-            _ = try stdout.write("\x1b[2J");
-            _ = try stdout.write("\x1b[H");
+            try exit();
             return true;
         },
 
@@ -449,42 +453,32 @@ pub fn refreshScreen(e: *Editor) !void {
     // e.cursor.y now referees to the position of the cursor within file
     try e.buffer.writer().print("\x1b[{};{}H", .{
         e.cursor.y - e.offset.y + 1,
-        e.cursor.rx - e.offset.x + 1,
+        LEFTSPACE + e.cursor.rx - e.offset.x + 1,
     });
 
     // show the cursor
     try e.buffer.appendSlice("\x1b[?25h");
-    _ = try stdout.write(e.buffer.items);
+    try stdout.writeAll(e.buffer.items);
 }
 
 pub fn refreshPrompt(e: *Editor) !void {
     defer e.buffer.clearAndFree();
 
-    // e.scroll();
-
-    // hide the cursor
-    try e.buffer.appendSlice("\x1b[?25l");
-    // clear all [2J:
-    // try edi.buffer.appendSlice("\x1b[2J"); // let's use \x1b[K instead
-    // reposition the cursor at the top-left corner; H command (Cursor Position)
-    try e.buffer.appendSlice("\x1b[H");
+    try e.buffer.appendSlice("\x1b[?25l\x1b[H");
 
     // try e.getWindowSize();
     try e.drawRows();
     try e.drawStatusBar();
     try e.drawMsgBar();
 
-    // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
-    // move the cursor
-    // e.cursor.y now referees to the position of the cursor within file
-    try e.buffer.writer().print("\x1b[{};{}H", .{
+    try e.buffer.writer().print("\x1b[{};{}H\x1b[?25h", .{
         e.screen.y + TABSTOP,
         e.cursor.x + 1,
     });
 
     // show the cursor
-    try e.buffer.appendSlice("\x1b[?25h");
-    _ = try stdout.write(e.buffer.items);
+    try e.buffer.appendSlice("");
+    try stdout.writeAll(e.buffer.items);
 }
 
 /// TODO: Window size, the hard way
@@ -573,6 +567,12 @@ fn drawRows(e: *Editor) !void {
                 try e.buffer.append('~');
             }
         } else {
+            if (SETNUMBER) {
+                const size = e.buffer.items.len;
+                try e.buffer.writer().print(" {d} ", .{file_row});
+                LEFTSPACE = e.buffer.items.len - size;
+            }
+
             const renders = e.row.items[file_row].render.items;
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
             if (len > e.screen.x) len = e.screen.x;

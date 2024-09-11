@@ -1,6 +1,7 @@
 const std = @import("std");
 const Terminal = @import("Terminal.zig");
 const Editor = @import("Editor.zig");
+const io = @import("io.zig");
 
 // SOME default keymaps:
 //canonical/cooked mode: char in read when BACKSPACE is pressed
@@ -20,23 +21,17 @@ pub fn main() !void {
     var arg = std.process.args();
     _ = arg.skip();
     if (arg.next()) |file_name| {
-        try edi.open(file_name);
+        try io.open(&edi, file_name);
     }
-
-    try edi.setStatusMsg("help: Ctrl-Z = quit", .{});
 
     // starts the editor layout
     try Terminal.initRawMode(&edi);
     defer Terminal.deinitRawMode(&edi);
 
-    try Editor.enableMouse();
-
     while (true) {
         try edi.refreshScreen();
         if (try edi.processKeyPressed()) break;
     }
-
-    try Editor.disableMouse();
 }
 
 test "simple test" {

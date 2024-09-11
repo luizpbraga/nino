@@ -178,14 +178,18 @@ fn save(e: *Editor) !void {
 
 pub fn processKeyPressed(e: *Editor) !bool {
     return switch (e.mode) {
-        .insert => try e.processKeyPressedInsertMode(),
-        .normal => try e.processKeyPressedNormalMode(),
-        .command => try e.processKeyPressedCommandMode(),
-        .visual => true,
+        .insert => try e.insertModeActions(),
+        .normal => try e.normalModeActions(),
+        .command => try e.commandModeActions(),
+        .visual => {
+            try e.setStatusMsg("Visual mode not implemented", .{});
+            e.mode = .normal;
+            return false;
+        },
     };
 }
 
-fn processKeyPressedCommandMode(e: *Editor) !bool {
+fn commandModeActions(e: *Editor) !bool {
     defer e.mode = .normal;
 
     const command = try e.prompt(":{s}") orelse {
@@ -193,10 +197,10 @@ fn processKeyPressedCommandMode(e: *Editor) !bool {
     };
     defer e.alloc.free(command);
 
-    const cmd = std.mem.trim(u8, command, " ");
+    const cmd = std.mem.trim(u8, command, " \t");
 
     if (std.mem.eql(u8, cmd, "help")) {
-        try e.setStatusMsg("help not available", .{});
+        try e.setStatusMsg("help not available KKKKKKKK", .{});
         return false;
     }
 
@@ -209,12 +213,12 @@ fn processKeyPressedCommandMode(e: *Editor) !bool {
         return false;
     }
 
-    if (std.mem.eql(u8, cmd, "q!")) {
+    if (std.mem.eql(u8, cmd, "q!") or std.mem.eql(u8, cmd, "quit!")) {
         try exit();
         return true;
     }
 
-    if (std.mem.eql(u8, cmd, "w")) {
+    if (std.mem.eql(u8, cmd, "w") or std.mem.eql(u8, cmd, "write")) {
         try e.save();
         return false;
     }
@@ -254,7 +258,7 @@ pub fn disableMouse() !void {
 }
 
 /// handles the keypress
-fn processKeyPressedInsertMode(e: *Editor) !bool {
+fn insertModeActions(e: *Editor) !bool {
     const key = try readKey();
     const key_tag: Key = @enumFromInt(key);
 
@@ -311,7 +315,7 @@ fn processKeyPressedInsertMode(e: *Editor) !bool {
     return false;
 }
 
-fn processKeyPressedNormalMode(e: *Editor) !bool {
+fn normalModeActions(e: *Editor) !bool {
     const key = try readKey();
     const key_tag: Key = @enumFromInt(key);
 
@@ -416,7 +420,7 @@ fn cx2rx(e: *Editor) usize {
 
 /// renders a render (line)
 /// TODO: precisa mesmo do row???
-fn updateRow(_: *Editor, row: *Row) !void {
+fn updateRow(row: *Row) !void {
     // renders tabs as multiple space characters.
     var tabs: usize = 0;
     for (row.chars.items) |char| if (char == '\t') {
@@ -738,7 +742,7 @@ fn insertRow(e: *Editor, at: usize, chars: []u8) !void {
     if (at > e.numOfRows()) return;
     var row = try e.createRow(at);
     try row.chars.appendSlice(chars);
-    try e.updateRow(row);
+    try updateRow(row);
 }
 
 fn insertNewLine(e: *Editor) !void {
@@ -757,7 +761,7 @@ fn insertNewLine(e: *Editor) !void {
     try e.insertRow(e.cursor.y + 1, chars[e.cursor.x..]);
     row = e.row.items[e.cursor.y];
     try row.chars.resize(e.cursor.x);
-    try e.updateRow(row);
+    try updateRow(row);
 }
 
 ///inserts a single character into an row, at the current (x, y) cursor
@@ -767,7 +771,7 @@ fn rowInsertChar(e: *Editor, row: *Row, at: usize, char: u8) !void {
     const len = row.charsLen();
     const cx = if (e.cursor.x > len) len else at;
     try row.chars.insert(cx, char);
-    try e.updateRow(row);
+    try updateRow(row);
 }
 
 fn insertChar(e: *Editor, key: u8) !void {
@@ -784,7 +788,7 @@ fn insertChar(e: *Editor, key: u8) !void {
 fn rowDeleteChar(e: *Editor, row: *Row, at: usize) !void {
     if (at >= row.charsLen()) return;
     _ = row.chars.orderedRemove(at);
-    try e.updateRow(row);
+    try updateRow(row);
     e.file_status += 1;
 }
 
@@ -824,7 +828,7 @@ fn deleteChar(e: *Editor) !void {
 fn rowAppendString(e: *Editor, row: *Row, string: []const u8) !void {
     defer e.file_status += 1;
     try row.chars.appendSlice(string);
-    try e.updateRow(row);
+    try updateRow(row);
 }
 
 /// displays a prompt in the status bar & and lets the user input a line

@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Status = @This();
-msg: [80]u8 = undefined,
+msg: [1000]u8 = undefined,
 time: i64 = 0,
 
 pub fn new(comptime fmt: []const u8, args: anytype) !Status {

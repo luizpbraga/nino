@@ -22,6 +22,14 @@ pub fn actions(e: *Editor) !bool {
         return false;
     }
 
+    if (eql(u8, cmd, "num")) {
+        Editor.SETNUMBER = !Editor.SETNUMBER;
+        Editor.LEFTSPACE = 0;
+        try e.setStatusMsg("SETNUMBERS = {}", .{Editor.SETNUMBER});
+        try e.refreshScreen();
+        return false;
+    }
+
     if (eql(u8, cmd, "q") or eql(u8, cmd, "quit")) {
         if (e.file_status == 0) {
             try io.exit();
@@ -74,6 +82,37 @@ pub fn actions(e: *Editor) !bool {
         Editor.ALLOCNAME = true;
 
         try io.save(e);
+        return false;
+    }
+
+    if (eql(u8, cmd, "statusbar")) {
+        try e.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
+        return false;
+    }
+
+    if (startsWith(u8, cmd, "statusbar")) {
+        if (startsWith(u8, cmd[10..], "+")) {
+            Editor.STATUSBAR += 1;
+        }
+
+        if (startsWith(u8, cmd[10..], "-")) {
+            Editor.STATUSBAR -= 1;
+        }
+
+        try e.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
+        return false;
+    }
+
+    if (eql(u8, cmd, "maps")) {
+        var list = std.ArrayList(u8).init(e.alloc);
+        defer list.deinit();
+        var iter = e.keyremap.hash.iterator();
+        while (iter.next()) |entry| {
+            const mode, const key = entry.key_ptr.*;
+            const keys = entry.value_ptr.*;
+            try list.writer().print("{} {} {any}\n", .{ mode, key, keys });
+        }
+        try e.setStatusMsg("{s}", .{list.items});
         return false;
     }
 

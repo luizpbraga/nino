@@ -2,6 +2,7 @@ const std = @import("std");
 const Terminal = @import("Terminal.zig");
 const Editor = @import("Editor.zig");
 const io = @import("io.zig");
+const asKey = @import("keys.zig").asKey;
 
 // SOME default keymaps:
 //canonical/cooked mode: char in read when BACKSPACE is pressed
@@ -23,6 +24,9 @@ pub fn main() !void {
     if (arg.next()) |file_name| {
         try io.open(&edi, file_name);
     }
+
+    // vim map ex
+    try edi.keyremap.map(.normal, asKey('o'), &.{ .END, .ENTER, asKey('i') });
 
     // starts the editor layout
     try Terminal.initRawMode(&edi);

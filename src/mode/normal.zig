@@ -7,10 +7,11 @@ const asKey = keys.asKey;
 const controlKey = keys.controlKey;
 
 pub fn actions(e: *Editor) !bool {
-    const key = try io.readKey();
-    const key_tag: Key = @enumFromInt(key);
+    const char = try io.readKey();
+    const key_tag: Key = @enumFromInt(char);
+    const keys_tag = e.keyremap.get(e.mode, key_tag) orelse &.{key_tag};
 
-    switch (key_tag) {
+    for (keys_tag) |key| switch (key) {
         .ENTER => try e.insertNewLine(),
 
         Editor.CTRL_Z => {
@@ -45,7 +46,7 @@ pub fn actions(e: *Editor) !bool {
         asKey('j'),
         asKey('k'),
         asKey('l'),
-        => e.moveCursor(key),
+        => e.moveCursor(@intFromEnum(key)),
 
         .PAGE_UP, .PAGE_DOWN => |c| {
             // positioning the cursor to the end/begin
@@ -80,7 +81,7 @@ pub fn actions(e: *Editor) !bool {
         asKey(':') => e.mode = .command,
 
         else => {},
-    }
+    };
 
     return false;
 }

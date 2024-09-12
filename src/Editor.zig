@@ -1,19 +1,20 @@
 const std = @import("std");
 const linux = std.os.linux;
 const stdout = std.io.getStdOut();
-const Row = @import("Row.zig");
-const Status = @import("Status.zig");
-
 const command = @import("mode/command.zig");
 const visual = @import("mode/visual.zig");
 const insert = @import("mode/insert.zig");
 const normal = @import("mode/normal.zig");
+const keys = @import("keys.zig");
+const Key = keys.Key;
+const KeyMap = keys.KeyMap;
+const Row = @import("Row.zig");
+const Status = @import("Status.zig");
+
+pub const Mode = enum { normal, insert, visual, command };
 
 const io = @import("io.zig");
 const readKey = io.readKey;
-
-const keys = @import("keys.zig");
-const Key = keys.Key;
 const asKey = keys.asKey;
 const controlKey = keys.controlKey;
 
@@ -30,8 +31,7 @@ pub const CTRL_S = controlKey('s');
 // highlight
 //https://pygments.org/
 pub var LEFTSPACE: usize = 0;
-pub var SETNUMBER = false;
-pub var NUMBERS = true;
+pub var SETNUMBER = !true;
 pub var TABSTOP: usize = 4;
 pub var STATUSBAR: usize = 2;
 pub var ALLOCNAME = false;
@@ -64,7 +64,9 @@ row: std.ArrayList(*Row),
 /// file status
 file_status: usize = 0,
 /// mode
-mode: enum { normal, insert, visual, command } = .normal,
+mode: Mode = .normal,
+/// remapping
+keyremap: KeyMap,
 
 /// Read the current terminal attributes into raw
 /// and save the terminal state
@@ -79,6 +81,7 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         .alloc = alloc,
         .row = .init(alloc),
         .buffer = .init(alloc),
+        .keyremap = .init(alloc),
         .orig_termios = orig_termios,
     };
 
@@ -95,6 +98,7 @@ pub fn deinit(e: *Editor) void {
     }
     e.row.deinit();
     e.buffer.deinit();
+    e.keyremap.deinit();
     if (ALLOCNAME) e.alloc.free(e.file_name);
 }
 
@@ -128,6 +132,7 @@ pub fn toString(e: *Editor) ![]const u8 {
     errdefer list.deinit();
     for (e.row.items) |row| {
         try list.writer().print("{s}\n", .{row.chars.items});
+        Editor.STATUSBAR += 1;
     }
     _ = list.popOrNull();
     return list.toOwnedSlice();
@@ -323,15 +328,15 @@ pub fn drawRows(e: *Editor) !void {
                 try e.buffer.append('~');
             }
         } else {
+            const renders = e.row.items[file_row].render.items;
+            var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
+            if (len > e.screen.x) len = e.screen.x;
             if (SETNUMBER) {
                 const size = e.buffer.items.len;
                 try e.buffer.writer().print(" {d} ", .{file_row});
                 LEFTSPACE = e.buffer.items.len - size;
+                // try e.buffer.appendNTimes(' ', LEFTSPACE);
             }
-
-            const renders = e.row.items[file_row].render.items;
-            var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
-            if (len > e.screen.x) len = e.screen.x;
             for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
         }
         // clear each line as we redraw them

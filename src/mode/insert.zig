@@ -7,10 +7,11 @@ const Key = keys.Key;
 
 /// handles the keypress
 pub fn actions(e: *Editor) !bool {
-    const key = try io.readKey();
-    const key_tag: Key = @enumFromInt(key);
+    const char = try io.readKey();
+    const key_tag: Key = @enumFromInt(char);
+    const keys_tag = e.keyremap.get(e.mode, key_tag) orelse &.{key_tag};
 
-    switch (key_tag) {
+    for (keys_tag) |key| switch (key) {
         .ENTER => try e.insertNewLine(),
 
         .ESC => e.mode = .normal,
@@ -27,7 +28,7 @@ pub fn actions(e: *Editor) !bool {
         .ARROW_DOWN,
         .ARROW_RIGHT,
         .ARROW_LEFT,
-        => e.moveCursor(key),
+        => e.moveCursor(@intFromEnum(key)),
 
         .PAGE_UP, .PAGE_DOWN => |c| {
             // positioning the cursor to the end/begin
@@ -57,8 +58,8 @@ pub fn actions(e: *Editor) !bool {
             e.cursor.x = chars.len;
         },
 
-        else => if (key < 128) try e.insertChar(@intCast(key)),
-    }
+        else => if (@intFromEnum(key) < 128) try e.insertChar(@intCast(@intFromEnum(key))),
+    };
 
     return false;
 }

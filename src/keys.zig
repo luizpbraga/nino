@@ -1,3 +1,7 @@
+const std = @import("std");
+const Editor = @import("Editor.zig");
+const Mode = Editor.Mode;
+
 pub const Key = enum(usize) {
     ENTER = '\r',
     ESC = '\x1b',
@@ -13,6 +17,29 @@ pub const Key = enum(usize) {
     PAGE_DOWN,
     MOUSE,
     _,
+};
+
+pub const KeyMap = struct {
+    const Hash = std.AutoHashMap(struct { Mode, Key }, []const Key);
+    hash: Hash,
+
+    pub fn init(alloc: std.mem.Allocator) KeyMap {
+        const hash: Hash = .init(alloc);
+        return .{ .hash = hash };
+    }
+
+    pub fn deinit(m: *KeyMap) void {
+        m.hash.deinit();
+    }
+
+    pub fn get(m: *KeyMap, mode: Mode, key: Key) ?[]const Key {
+        return m.hash.get(.{ mode, key });
+    }
+
+    pub fn map(m: *KeyMap, mode: Mode, key: Key, keys: []const Key) !void {
+        if (keys.len == 0) return;
+        try m.hash.put(.{ mode, key }, keys);
+    }
 };
 
 pub fn controlKey(c: usize) Key {

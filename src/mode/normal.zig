@@ -80,6 +80,15 @@ pub fn actions(e: *Editor) !bool {
 
         asKey(':') => e.mode = .command,
 
+        asKey('C') => {
+            // TODO
+            while (e.cursor.x != e.rowAt(e.cursor.y).charsLen()) {
+                e.moveCursor(@intFromEnum(Key.ARROW_RIGHT));
+                try e.deleteChar();
+            }
+            e.mode = .insert;
+        },
+
         else => {},
     };
 

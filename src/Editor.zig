@@ -276,10 +276,18 @@ pub fn drawMsgBar(e: *Editor) !void {
     try e.buffer.appendSlice("\x1b[K");
     const msg = e.status.msg;
     if (msg.len == 0) return;
-    const len = if (msg.len > e.screen.x) e.screen.x else msg.len;
+
     if (std.time.timestamp() - e.status.time < 5) {
-        try e.buffer.appendSlice(msg[0..len]);
+        try e.buffer.appendSlice(&msg);
+        Editor.STATUSBAR += std.mem.count(u8, &msg, "\n");
+    } else {
+        Editor.STATUSBAR = 2;
     }
+
+    // const len = if (msg.len > e.screen.x) e.screen.x else msg.len;
+    // if (std.time.timestamp() - e.status.time < 5) {
+    //     try e.buffer.appendSlice(msg[0..len]);
+    // }
 }
 
 pub fn drawStatusBar(e: *Editor) !void {
@@ -531,6 +539,14 @@ pub fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
             '\r' => if (input.items.len != 0) {
                 try e.setStatusMsg("", .{});
                 return try input.toOwnedSlice();
+            },
+
+            @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 1) {
+                e.cursor.x -= 1;
+            },
+
+            @intFromEnum(Key.ARROW_RIGHT) => if (e.cursor.x <= input.items.len) {
+                e.cursor.x += 1;
             },
 
             else => |c| if (c >= 0 and c < 128) {

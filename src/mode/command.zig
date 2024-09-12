@@ -22,10 +22,15 @@ pub fn actions(e: *Editor) !bool {
         return false;
     }
 
+    if (eql(u8, cmd, "poem")) {
+        try e.setStatusMsg("Poeminho do Contra\n\roi\n\rtchau", .{});
+        return false;
+    }
+
     if (eql(u8, cmd, "num")) {
         Editor.SETNUMBER = !Editor.SETNUMBER;
         Editor.LEFTSPACE = 0;
-        try e.setStatusMsg("SETNUMBERS = {}", .{Editor.SETNUMBER});
+        try e.setStatusMsg("setnumbers = {}", .{Editor.SETNUMBER});
         try e.refreshScreen();
         return false;
     }
@@ -57,6 +62,16 @@ pub fn actions(e: *Editor) !bool {
 
         try io.save(e);
         return false;
+    }
+
+    if (eql(u8, cmd, "wq")) {
+        if (e.file_name.len == 0) {
+            try e.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
+            return false;
+        }
+        try io.save(e);
+        try io.exit();
+        return true;
     }
 
     if (startsWith(u8, cmd, "w ")) {
@@ -112,6 +127,7 @@ pub fn actions(e: *Editor) !bool {
             const keys = entry.value_ptr.*;
             try list.writer().print("{} {} {any}\n", .{ mode, key, keys });
         }
+        _ = list.pop();
         try e.setStatusMsg("{s}", .{list.items});
         return false;
     }

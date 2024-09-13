@@ -39,6 +39,12 @@ pub var ALLOCNAME = false;
 pub var SETMOUSE = false;
 pub var MOUSECOORD: Coordinate = .{};
 
+const Config = struct {
+    mouse: bool = false,
+    numbers: struct { allow: bool = false, relative: bool = false } = .{},
+    staturbar: struct { allow: bool = true, size: usize = 2 } = .{},
+};
+
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
 /// x, y: index into the chars in a row
@@ -206,7 +212,6 @@ pub fn refreshScreen(e: *Editor) !void {
     // reposition the cursor at the top-left corner; H command (Cursor Position)
     try e.buffer.appendSlice("\x1b[H");
 
-    // try e.getWindowSize();
     // TODO: put this in another way
     if (SETNUMBER) LEFTSPACE = std.fmt.count("  {} ", .{e.screen.y + e.offset.y});
     try e.drawRows();

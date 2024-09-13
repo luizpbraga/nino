@@ -349,8 +349,9 @@ pub fn drawRows(e: *Editor) !void {
             if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
             if (SETNUMBER) {
                 var size = e.buffer.items.len;
-                try e.buffer.writer().print(" {}  ", .{file_row});
-                size = e.buffer.items.len - size;
+                try e.buffer.writer().print(" \x1b[3m{}\x1b[0m  ", .{file_row});
+                const italic_scape_size = 8;
+                size = e.buffer.items.len - size - italic_scape_size;
                 if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
             }
             for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);

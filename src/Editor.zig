@@ -41,6 +41,8 @@ pub var MOUSECOORD: Coordinate = .{};
 
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
+/// x, y: index into the chars in a row
+/// rx: render field, same as x when no special character is available
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
 /// cursor
@@ -205,6 +207,8 @@ pub fn refreshScreen(e: *Editor) !void {
     try e.buffer.appendSlice("\x1b[H");
 
     // try e.getWindowSize();
+    // TODO: put this in another way
+    if (SETNUMBER) LEFTSPACE = std.fmt.count(" {} ", .{e.screen.y + e.offset.y});
     try e.drawRows();
     try e.drawStatusBar();
     try e.drawMsgBar();
@@ -340,10 +344,10 @@ pub fn drawRows(e: *Editor) !void {
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
             if (len > e.screen.x) len = e.screen.x;
             if (SETNUMBER) {
-                const size = e.buffer.items.len;
+                var size = e.buffer.items.len;
                 try e.buffer.writer().print(" {d} ", .{file_row});
-                LEFTSPACE = e.buffer.items.len - size;
-                // try e.buffer.appendNTimes(' ', LEFTSPACE);
+                size = e.buffer.items.len - size;
+                if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
             }
             for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
         }
@@ -362,6 +366,7 @@ pub fn scroll(e: *Editor) void {
     // same shit to x
     if (e.cursor.x < e.offset.x) e.offset.x = e.cursor.rx;
     if (e.cursor.x >= e.offset.x + e.screen.x) e.offset.x = e.cursor.rx - e.screen.x + 1;
+    e.setStatusMsg("x:{},rx:{},ox:{},sx:{}", .{ e.cursor.x, e.cursor.rx, e.offset.x, e.screen.x }) catch {};
 }
 
 pub fn moveCursor(e: *Editor, key: usize) void {

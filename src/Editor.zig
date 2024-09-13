@@ -346,7 +346,7 @@ pub fn drawRows(e: *Editor) !void {
         } else {
             const renders = e.row.items[file_row].render.items;
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
-            if (len > e.screen.x) len = e.screen.x - LEFTSPACE;
+            if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
             if (SETNUMBER) {
                 var size = e.buffer.items.len;
                 try e.buffer.writer().print(" {d} ", .{file_row});
@@ -368,10 +368,9 @@ pub fn scroll(e: *Editor) void {
     // checks if the cursor is above the bottom of the visible windows
     if (e.cursor.y >= e.offset.y + e.screen.y) e.offset.y = e.cursor.y - e.screen.y + 1;
     // same shit to x
-    if (e.cursor.x < e.offset.x) e.offset.x = e.cursor.rx;
-    if (e.cursor.x + LEFTSPACE >= e.offset.x + e.screen.x) e.offset.x = LEFTSPACE + e.cursor.rx - e.screen.x + 1;
-
-    // e.setStatusMsg("x:{},rx:{},ox:{},sx:{}", .{ e.cursor.x, e.cursor.rx, e.offset.x, e.screen.x }) catch {};
+    if (e.cursor.rx < e.offset.x) e.offset.x = e.cursor.rx;
+    if (e.cursor.rx + LEFTSPACE >= e.offset.x + e.screen.x) e.offset.x = LEFTSPACE + e.cursor.rx - e.screen.x + 1;
+    e.setStatusMsg("y:{},l:{},x:{},rx:{},ox:{},sx:{}", .{ e.cursor.y, LEFTSPACE, e.cursor.x, e.cursor.rx, e.offset.x, e.screen.x }) catch {};
 }
 
 pub fn moveCursor(e: *Editor, key: usize) void {

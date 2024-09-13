@@ -4,6 +4,7 @@ const io = @import("../io.zig");
 
 const keys = @import("../keys.zig");
 const Key = keys.Key;
+const controlKey = keys.controlKey;
 
 /// handles the keypress
 pub fn actions(e: *Editor) !bool {
@@ -57,6 +58,11 @@ pub fn actions(e: *Editor) !bool {
             const chars = e.row.items[e.cursor.y].chars.items;
             e.cursor.x = chars.len;
         },
+
+        // controlKey('-'), controlKey('+') => {
+        //     try e.getWindowSize();
+        //     try e.refreshScreen();
+        // },
 
         else => if (@intFromEnum(key) < 128) try e.insertChar(@intCast(@intFromEnum(key))),
     };

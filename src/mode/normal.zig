@@ -89,6 +89,11 @@ pub fn actions(e: *Editor) !bool {
             e.mode = .insert;
         },
 
+        // controlKey('-'), controlKey('+') => {
+        //     try e.getWindowSize();
+        //     try e.refreshScreen();
+        // },
+
         else => {},
     };
 

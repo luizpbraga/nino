@@ -16,6 +16,8 @@ pub const Key = enum(usize) {
     PAGE_UP,
     PAGE_DOWN,
     MOUSE,
+    ZOONIN,
+    ZOONOUT,
     _,
 };
 
@@ -43,6 +45,8 @@ pub const KeyMap = struct {
 };
 
 pub fn controlKey(c: usize) Key {
+    if (c == '-') return .ZOONIN;
+    if (c == '+') return .ZOONOUT;
     return @enumFromInt(c & 0x1f);
 }
 

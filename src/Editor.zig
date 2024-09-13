@@ -140,7 +140,7 @@ pub fn toString(e: *Editor) ![]const u8 {
     errdefer list.deinit();
     for (e.row.items) |row| {
         try list.writer().print("{s}\n", .{row.chars.items});
-        Editor.STATUSBAR += 1;
+        STATUSBAR += 1;
     }
     _ = list.popOrNull();
     return list.toOwnedSlice();
@@ -213,7 +213,8 @@ pub fn refreshScreen(e: *Editor) !void {
     try e.buffer.appendSlice("\x1b[H");
 
     // TODO: put this in another way
-    if (SETNUMBER) LEFTSPACE = std.fmt.count("  {} ", .{e.screen.y + e.offset.y});
+    if (SETNUMBER) LEFTSPACE = std.fmt.count(" {}  ", .{e.screen.y + e.offset.y});
+
     try e.drawRows();
     try e.drawStatusBar();
     try e.drawMsgBar();
@@ -287,44 +288,43 @@ pub fn drawMsgBar(e: *Editor) !void {
 
     if (std.time.timestamp() - e.status.time < 5) {
         try e.buffer.appendSlice(&msg);
-        Editor.STATUSBAR += std.mem.count(u8, &msg, "\n");
+        STATUSBAR += std.mem.count(u8, &msg, "\n");
     } else {
-        Editor.STATUSBAR = 2;
+        STATUSBAR = 2;
     }
-
-    // const len = if (msg.len > e.screen.x) e.screen.x else msg.len;
-    // if (std.time.timestamp() - e.status.time < 5) {
-    //     try e.buffer.appendSlice(msg[0..len]);
-    // }
 }
 
 pub fn drawStatusBar(e: *Editor) !void {
     // switch colors
     try e.buffer.appendSlice("\x1b[7m");
 
+    // ugly peace of shit!!!
+    const page_percent = b: {
+        const yf: f64 = @floatFromInt(e.cursor.y);
+        const nr: f64 = @floatFromInt(e.numOfRows());
+        break :b 100 * yf / nr;
+    };
+
     var lstatus: [80]u8 = undefined;
-    var llen = b: {
+    const llen = b: {
         const modified = if (e.file_status == 0) "" else "[+]";
         const file_name = if (e.file_name.len == 0) "[NO NAME]" else e.file_name;
-        const buf = try std.fmt.bufPrint(&lstatus, "{s}> {s} {s}", .{ @tagName(e.mode), file_name, modified });
+        const buf = try std.fmt.bufPrint(&lstatus, " \x1b[1m{s}>>\x1b[22m {s} {s}", .{ @tagName(e.mode), file_name, modified });
         break :b if (buf.len > e.screen.x) e.screen.x else buf.len;
     };
 
-    try e.buffer.appendSlice(lstatus[0..llen]);
-
     var rstatus: [80]u8 = undefined;
     const rlen = b: {
-        const buf = try std.fmt.bufPrint(&rstatus, "<{d}:{d} ", .{ e.cursor.y, e.cursor.x });
+        const buf = try std.fmt.bufPrint(&rstatus, "\x1b[1m<< {d:.0}% {d}:{d} \x1b[22m", .{ page_percent, e.cursor.x, e.cursor.y });
         break :b buf.len;
     };
 
-    while (llen < e.screen.x) : (llen += 1) {
-        if (e.screen.x - llen == rlen) {
-            try e.buffer.appendSlice(rstatus[0..rlen]);
-            break;
-        }
-        try e.buffer.append(' ');
-    }
+    // 18 = sizes of \x1b[...
+    const spaces = e.screen.x + 18 - llen - rlen;
+    try e.buffer.appendSlice(lstatus[0..llen]);
+    try e.buffer.appendNTimes(' ', spaces);
+    try e.buffer.appendSlice(rstatus[0..rlen]);
+
     // reswitch colors
     try e.buffer.appendSlice("\x1b[0m\r\n");
 }
@@ -349,7 +349,7 @@ pub fn drawRows(e: *Editor) !void {
             if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
             if (SETNUMBER) {
                 var size = e.buffer.items.len;
-                try e.buffer.writer().print(" {d} ", .{file_row});
+                try e.buffer.writer().print(" {}  ", .{file_row});
                 size = e.buffer.items.len - size;
                 if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
             }
@@ -370,7 +370,6 @@ pub fn scroll(e: *Editor) void {
     // same shit to x
     if (e.cursor.rx < e.offset.x) e.offset.x = e.cursor.rx;
     if (e.cursor.rx + LEFTSPACE >= e.offset.x + e.screen.x) e.offset.x = LEFTSPACE + e.cursor.rx - e.screen.x + 1;
-    e.setStatusMsg("y:{},l:{},x:{},rx:{},ox:{},sx:{}", .{ e.cursor.y, LEFTSPACE, e.cursor.x, e.cursor.rx, e.offset.x, e.screen.x }) catch {};
 }
 
 pub fn moveCursor(e: *Editor, key: usize) void {

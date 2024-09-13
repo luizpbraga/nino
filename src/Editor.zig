@@ -260,7 +260,6 @@ pub fn getWindowSize(e: *Editor) !void {
     }
     e.screen.y = ws.row;
     e.screen.x = ws.col;
-    // drawRows() will not try to draw in the last line in the screen
     e.screen.y -= STATUSBAR;
 }
 
@@ -372,7 +371,7 @@ pub fn scroll(e: *Editor) void {
     if (e.cursor.x < e.offset.x) e.offset.x = e.cursor.rx;
     if (e.cursor.x + LEFTSPACE >= e.offset.x + e.screen.x) e.offset.x = LEFTSPACE + e.cursor.rx - e.screen.x + 1;
 
-    e.setStatusMsg("x:{},rx:{},ox:{},sx:{}", .{ e.cursor.x, e.cursor.rx, e.offset.x, e.screen.x }) catch {};
+    // e.setStatusMsg("x:{},rx:{},ox:{},sx:{}", .{ e.cursor.x, e.cursor.rx, e.offset.x, e.screen.x }) catch {};
 }
 
 pub fn moveCursor(e: *Editor, key: usize) void {

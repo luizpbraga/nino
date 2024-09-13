@@ -94,6 +94,22 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
     };
     defer file.close();
 
+    var buf: [1024]u8 = undefined;
+    while (true) {
+        // BUG: ? fix this issue
+        // const line = try e.flog.?.reader().readUntilDelimiterOrEofAlloc(e.alloc, '\n', 100000) orelse break;
+        const line = try file.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
+        try e.insertRow(e.numOfRows(), line);
+    }
+
+    e.file_name = file_name;
+    e.file_status = 0;
+}
+
+pub fn read(e: *Editor, file_name: []const u8) !void {
+    const cwd = std.fs.cwd();
+    var file = try cwd.openFile(file_name, .{ .mode = .read_write });
+    defer file.close();
     // BUG:
     var buf: [1024]u8 = undefined;
     while (true) {
@@ -102,9 +118,7 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
         const line = try file.reader().readUntilDelimiterOrEof(&buf, '\n') orelse break;
         try e.insertRow(e.numOfRows(), line);
     }
-
-    e.file_name = file_name;
-    e.file_status = 0;
+    e.file_status += 1;
 }
 
 pub fn save(e: *Editor) !void {

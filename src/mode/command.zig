@@ -7,6 +7,24 @@ const eql = mem.eql;
 const startsWith = mem.startsWith;
 const trim = mem.trim;
 
+/// tag union??? a big if ????
+const Commands = union(enum(u8)) {
+    read,
+    write,
+    number,
+    quit,
+    _,
+};
+
+const command_map = std.StaticStringMap(Commands).initComptime(
+    .{ "r", .read },
+    .{ "read", .read },
+    .{ "w", .write },
+    .{ "write", .write },
+    .{ "q", .quit },
+    .{ "quit", .quit },
+);
+
 pub fn actions(e: *Editor) !bool {
     defer e.mode = .normal;
 
@@ -32,6 +50,16 @@ pub fn actions(e: *Editor) !bool {
         Editor.LEFTSPACE = 0;
         try e.setStatusMsg("setnumbers = {}", .{Editor.SETNUMBER});
         try e.refreshScreen();
+        return false;
+    }
+
+    if (startsWith(u8, cmd, "r ")) {
+        const file = cmd[2..];
+        io.read(e, file) catch |err| switch (err) {
+            error.FileNotFound, error.AccessDenied => try e.setStatusMsg("Warn: read not implemented", .{}),
+            else => return err,
+        };
+        try e.setStatusMsg("\"{s}\" [noeol] <TODO>L, <TODO>B", .{file});
         return false;
     }
 

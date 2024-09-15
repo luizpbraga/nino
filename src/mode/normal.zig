@@ -78,6 +78,8 @@ pub fn actions(e: *Editor) !bool {
 
         asKey('i') => e.mode = .insert,
 
+        asKey('v') => e.mode = .visual,
+
         asKey(':') => e.mode = .command,
 
         asKey('C') => {

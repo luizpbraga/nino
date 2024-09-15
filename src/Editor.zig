@@ -18,6 +18,8 @@ const readKey = io.readKey;
 const asKey = keys.asKey;
 const controlKey = keys.controlKey;
 
+const Visual = visual.Visual;
+
 /// deals with low-level terminal input and mapping
 const Editor = @This();
 const VERSION = "0.0.2";
@@ -38,6 +40,7 @@ pub var ALLOCNAME = false;
 /// SORRY ABOUT THIS
 pub var SETMOUSE = false;
 pub var MOUSECOORD: Coordinate = .{};
+pub var INBLOCKMODE = false;
 
 const Config = struct {
     mouse: bool = false,
@@ -51,6 +54,8 @@ const Coordinate = struct { x: usize = 0, y: usize = 0 };
 /// rx: render field, same as x when no special character is available
 const CursorCoordinate = struct { x: usize = 0, y: usize = 0, rx: usize = 0 };
 
+/// visual block coord
+vb: Visual = .{},
 /// cursor
 cursor: CursorCoordinate = .{},
 /// offset
@@ -115,10 +120,12 @@ pub fn processKeyPressed(e: *Editor) !bool {
         .insert => try insert.actions(e),
         .normal => try normal.actions(e),
         .command => try command.actions(e),
-        .visual => {
-            try e.setStatusMsg("Visual mode not implemented", .{});
-            e.mode = .normal;
-            return false;
+        .visual => b: {
+            if (!INBLOCKMODE) {
+                try Visual.update(e);
+                INBLOCKMODE = true;
+            }
+            break :b try visual.actions(e);
         },
     };
 }

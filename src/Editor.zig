@@ -315,7 +315,10 @@ pub fn drawStatusBar(e: *Editor) !void {
     var lstatus: [80]u8 = undefined;
     const llen = b: {
         const modified = if (e.file_status == 0) "" else "[+]";
-        const file_name = if (e.file_name.len == 0) "[NO NAME]" else e.file_name;
+        const file_name = if (e.file_name.len == 0) "[NO NAME]" else x: {
+            const idx = std.mem.lastIndexOf(u8, e.file_name, "/") orelse break :x e.file_name;
+            break :x e.file_name[idx + 1 ..];
+        };
         const buf = try std.fmt.bufPrint(&lstatus, " \x1b[1m{s}>>\x1b[22m {s} {s}", .{ @tagName(e.mode), file_name, modified });
         break :b if (buf.len > e.screen.x) e.screen.x else buf.len;
     };

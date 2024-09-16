@@ -6,7 +6,7 @@ const Key = keys.Key;
 const asKey = keys.asKey;
 
 pub const Visual = struct {
-    const INVERSE = "\x1b[2m";
+    const INVERSE = "\x1b[9m";
     const RESET = "\x1b[0m";
     const SIZE = 4;
     const mode = enum { line, block, standard };
@@ -36,6 +36,8 @@ pub const Visual = struct {
             _ = e.row.items[e.vb.yf].chars.orderedRemove(e.vb.xf - i);
         }
         try Editor.updateRow(e.row.items[e.vb.yf]);
+        e.mode = .normal;
+        Editor.INBLOCKMODE = false;
         e.vb = .default;
     }
 
@@ -89,10 +91,22 @@ pub fn actions(e: *Editor) !bool {
     const keys_tag = e.keyremap.get(e.mode, key_tag) orelse &.{key_tag};
 
     for (keys_tag) |key| switch (key) {
-        asKey('v'), .ESC => {
-            e.mode = .normal;
+        asKey('c') => {
+            const xi = e.vb.xi;
+            const xf = e.vb.xf;
+            e.cursor.x = xi;
             try Visual.free(e);
-            Editor.INBLOCKMODE = false;
+
+            // WORKED LIKE DARK MAGIC
+            for (xf - xi - 4) |_| {
+                _ = e.row.items[e.vb.yf].chars.orderedRemove(xi);
+            }
+
+            try Editor.updateRow(e.row.items[e.vb.yi]);
+        },
+
+        asKey('v'), .ESC => {
+            try Visual.free(e);
         },
 
         // cursor movement keys

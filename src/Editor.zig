@@ -124,6 +124,7 @@ pub fn processKeyPressed(e: *Editor) !bool {
             if (!INBLOCKMODE) {
                 try Visual.update(e);
                 INBLOCKMODE = true;
+                try e.refreshScreen();
             }
             break :b try visual.actions(e);
         },

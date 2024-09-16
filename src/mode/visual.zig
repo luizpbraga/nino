@@ -6,7 +6,7 @@ const Key = keys.Key;
 const asKey = keys.asKey;
 
 pub const Visual = struct {
-    const INVERSE = "\x1b[7m";
+    const INVERSE = "\x1b[2m";
     const RESET = "\x1b[0m";
     const SIZE = 4;
     const mode = enum { line, block, standard };
@@ -19,21 +19,18 @@ pub const Visual = struct {
 
     // BUG: corners, offset rows
     pub fn update(e: *Editor) !void {
-        try e.row.items[e.cursor.y].chars.insertSlice(e.cursor.rx + 1, RESET);
-        try e.row.items[e.cursor.y].chars.insertSlice(e.cursor.rx, INVERSE); // appenda em i, H vai p x + 1
+        try e.row.items[e.cursor.y].chars.insertSlice(e.cursor.x + 1, RESET);
+        try e.row.items[e.cursor.y].chars.insertSlice(e.cursor.x, INVERSE); // appenda em i, H vai p x + 1
         e.vb = .{
             .xi = e.cursor.x,
             .xf = e.cursor.x + SIZE + 1,
             .yi = e.cursor.y,
             .yf = e.cursor.y,
         };
-        try e.setStatusMsg(">x:{},xi:{},xf:{}", .{ e.cursor.x, e.vb.xi, e.vb.xf });
         try Editor.updateRow(e.row.items[e.cursor.y]);
     }
 
     pub fn free(e: *Editor) !void {
-        // for (0..SIZE) |_| _ = e.row.items[e.vb.yf].chars.orderedRemove(e.vb.xf);
-        // for (0..SIZE) |_| _ = e.row.items[e.vb.yf].chars.orderedRemove(e.vb.xi);
         for (1..SIZE + 1) |i| {
             _ = e.row.items[e.vb.yf].chars.orderedRemove(e.vb.xi);
             _ = e.row.items[e.vb.yf].chars.orderedRemove(e.vb.xf - i);
@@ -43,39 +40,45 @@ pub const Visual = struct {
     }
 
     pub fn move(e: *Editor, k: Key) !bool {
-        if (e.vb.xf + 1 + SIZE > e.row.items[e.vb.yi].chars.items.len) return false;
+        const chars = e.row.items[e.vb.yi].chars.items;
 
-        // TODO:; xi and xf bounds
         switch (k) {
-            .ARROW_RIGHT => if (e.cursor.x >= e.vb.xi) {
-                for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xf);
-                e.vb.xf += 1;
-                try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xf, RESET);
-                e.moveCursor(@intFromEnum(k));
-            } else {
-                for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xi);
-                e.vb.xi += 1;
-                try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xi, INVERSE);
+            .ARROW_RIGHT => {
+                // WHAT THE FUCK?!?!?!?!
+                if (e.cursor.x + 2 * SIZE + 1 >= chars.len) return false;
+
+                if (e.cursor.x + SIZE + 1 == e.vb.xf) {
+                    for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xf);
+                    e.vb.xf += 1;
+                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xf, RESET);
+                } else {
+                    for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xi);
+                    e.vb.xi += 1;
+                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xi, INVERSE);
+                }
+                try e.setStatusMsg("x:{},xi:{},xf:{},len:{},c:{c}", .{ e.cursor.x, e.vb.xi, e.vb.xf, chars.len, chars[e.cursor.x + SIZE] });
+
                 e.moveCursor(@intFromEnum(k));
             },
 
-            .ARROW_LEFT => if (e.cursor.x >= e.vb.xi) {
-                for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xf);
-                e.vb.xf -= 1;
-                try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xf, RESET);
-                e.moveCursor(@intFromEnum(k));
-            } else {
-                for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xi);
-                e.vb.xi -= 1;
-                try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xi, INVERSE);
+            .ARROW_LEFT => {
+                if (e.cursor.x == 0) return false;
+
+                if (e.vb.xi == e.cursor.x) {
+                    for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xi);
+                    e.vb.xi -= 1;
+                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xi, INVERSE);
+                } else {
+                    for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xf);
+                    e.vb.xf -= 1;
+                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xf, RESET);
+                }
                 e.moveCursor(@intFromEnum(k));
             },
             else => {},
         }
 
-        try e.setStatusMsg("x:{},xi:{},xf:{}", .{ e.cursor.x, e.vb.xi, e.vb.xf });
         try Editor.updateRow(e.row.items[e.vb.yi]);
-
         return true;
     }
 };

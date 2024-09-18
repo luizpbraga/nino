@@ -3,6 +3,16 @@ const Editor = @import("Editor.zig");
 const Mode = Editor.Mode;
 
 pub const Key = enum(usize) {
+    @"0" = '0',
+    @"1" = '1',
+    @"2" = '2',
+    @"3" = '3',
+    @"4" = '4',
+    @"5" = '5',
+    @"6" = '6',
+    @"7" = '7',
+    @"8" = '8',
+    @"9" = '9',
     ENTER = '\r',
     ESC = '\x1b',
     BACKSPACE = 127,

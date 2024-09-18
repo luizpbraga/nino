@@ -133,13 +133,15 @@ pub fn actions(e: *Editor) !bool {
         return false;
     }
 
-    if (startsWith(u8, cmd, "statusbar")) {
-        if (startsWith(u8, cmd[10..], "+")) {
+    if (startsWith(u8, cmd, "stat")) {
+        if (startsWith(u8, cmd[4..], "+")) {
             Editor.STATUSBAR += 1;
+            e.screen.y -= 1;
         }
 
-        if (startsWith(u8, cmd[10..], "-")) {
+        if (startsWith(u8, cmd[4..], "-")) {
             Editor.STATUSBAR -= 1;
+            e.screen.y += 1;
         }
 
         try e.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
@@ -157,6 +159,15 @@ pub fn actions(e: *Editor) !bool {
         }
         _ = list.pop();
         try e.setStatusMsg("{s}", .{list.items});
+        return false;
+    }
+
+    const n = std.fmt.parseUnsigned(isize, cmd, 10) catch -1;
+    if (n != -1) {
+        e.cursor.y = if (n < e.numOfRows()) @intCast(n) else b: {
+            break :b if (e.numOfRows() != 0) e.numOfRows() - 1 else 0;
+        };
+        e.cursor.x = if (e.cursor.x < e.rowAt(e.cursor.x).charsLen()) e.cursor.x else 0;
         return false;
     }
 

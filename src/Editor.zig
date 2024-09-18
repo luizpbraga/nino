@@ -189,17 +189,18 @@ pub fn updateRow(row: *Row) !void {
     {
         var idx: usize = 0;
         for (row.chars.items, 0..) |char, j| {
-            if (char != '\t') {
-                row.render.items[idx] = row.chars.items[j];
+            if (char == '\t') {
+                // handles \t
+                row.render.items[idx] = ' ';
                 idx += 1;
+                while (idx % TABSTOP != 0) : (idx += 1) {
+                    row.render.items[idx] = ' ';
+                }
                 continue;
             }
-            // handles \t
-            row.render.items[idx] = ' ';
+
+            row.render.items[idx] = row.chars.items[j];
             idx += 1;
-            while (idx % TABSTOP != 0) : (idx += 1) {
-                row.render.items[idx] = ' ';
-            }
         }
         try row.render.resize(idx);
     }
@@ -214,7 +215,7 @@ pub fn refreshScreen(e: *Editor) !void {
     e.scroll();
 
     // hide the cursor
-    try e.buffer.appendSlice("\x1b[?25l");
+    // try e.buffer.appendSlice("\x1b[?25l");
     // clear all [2J:
     // try edi.buffer.appendSlice("\x1b[2J"); // let's use \x1b[K instead
     // reposition the cursor at the top-left corner; H command (Cursor Position)
@@ -236,7 +237,7 @@ pub fn refreshScreen(e: *Editor) !void {
     });
 
     // show the cursor
-    try e.buffer.appendSlice("\x1b[?25h");
+    // try e.buffer.appendSlice("\x1b[?25h");
     try stdout.writeAll(e.buffer.items);
 }
 
@@ -294,7 +295,7 @@ pub fn drawMsgBar(e: *Editor) !void {
     const msg = e.status.msg;
     if (msg.len == 0) return;
 
-    if (std.time.timestamp() - e.status.time < 5) {
+    if (std.time.timestamp() - e.status.time < 4) {
         try e.buffer.appendSlice(&msg);
         STATUSBAR += std.mem.count(u8, &msg, "\n");
     } else {
@@ -357,7 +358,9 @@ pub fn drawRows(e: *Editor) !void {
         } else {
             const renders = e.row.items[file_row].render.items;
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
+
             if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
+
             if (SETNUMBER) {
                 var size = e.buffer.items.len;
                 try e.buffer.writer().print(" \x1b[3m{}\x1b[0m  ", .{file_row});
@@ -365,7 +368,21 @@ pub fn drawRows(e: *Editor) !void {
                 size = e.buffer.items.len - size - italic_scape_size;
                 if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
             }
-            for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
+
+            // I KNOW I CAN DO BETTER, OK?!
+            if (e.mode == .visual) {
+                const x = e.screen.x - LEFTSPACE + 8;
+                var i: usize = 0;
+                while (i < x) : (i += 1) {
+                    if (e.offset.x + i == renders.len) {
+                        try e.setStatusMsg("{} {}", .{ i, e.offset.x });
+                        break;
+                    }
+                    try e.buffer.append(renders[e.offset.x + i]);
+                }
+            } else {
+                for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
+            }
         }
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K");

@@ -52,14 +52,12 @@ pub const Visual = struct {
                 if (e.cursor.x + SIZE + 1 == e.vb.xf) {
                     for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xf);
                     e.vb.xf += 1;
-                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xf, RESET);
+                    try e.row.items[e.vb.yf].chars.insertSlice(e.vb.xf, RESET);
                 } else {
                     for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xi);
                     e.vb.xi += 1;
-                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xi, INVERSE);
+                    try e.row.items[e.vb.yf].chars.insertSlice(e.vb.xi, INVERSE);
                 }
-                try e.setStatusMsg("x:{},xi:{},xf:{},len:{},c:{c}", .{ e.cursor.x, e.vb.xi, e.vb.xf, chars.len, chars[e.cursor.x + SIZE] });
-
                 e.moveCursor(@intFromEnum(k));
             },
 
@@ -69,12 +67,21 @@ pub const Visual = struct {
                 if (e.vb.xi == e.cursor.x) {
                     for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xi);
                     e.vb.xi -= 1;
-                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xi, INVERSE);
+                    try e.row.items[e.vb.yf].chars.insertSlice(e.vb.xi, INVERSE);
                 } else {
                     for (0..SIZE) |_| _ = e.row.items[e.vb.yi].chars.orderedRemove(e.vb.xf);
                     e.vb.xf -= 1;
-                    try e.row.items[e.vb.yi].chars.insertSlice(e.vb.xf, RESET);
+                    try e.row.items[e.vb.yf].chars.insertSlice(e.vb.xf, RESET);
                 }
+                e.moveCursor(@intFromEnum(k));
+            },
+
+            .ARROW_UP => {
+                e.vb.yf -= 1;
+                e.moveCursor(@intFromEnum(k));
+            },
+            .ARROW_DOWN => {
+                e.vb.yf += 1;
                 e.moveCursor(@intFromEnum(k));
             },
             else => {},
@@ -94,15 +101,15 @@ pub fn actions(e: *Editor) !bool {
         asKey('c') => {
             const xi = e.vb.xi;
             const xf = e.vb.xf;
+            const yf = e.vb.yf;
             e.cursor.x = xi;
+            const s = @abs(xf - xi - 4);
             try Visual.free(e);
-
             // WORKED LIKE DARK MAGIC
-            for (xf - xi - 4) |_| {
-                _ = e.row.items[e.vb.yf].chars.orderedRemove(xi);
+            for (s) |_| {
+                _ = e.row.items[yf].chars.orderedRemove(xi);
             }
-
-            try Editor.updateRow(e.row.items[e.vb.yi]);
+            try Editor.updateRow(e.row.items[yf]);
         },
 
         asKey('v'), .ESC => {
@@ -110,11 +117,7 @@ pub fn actions(e: *Editor) !bool {
         },
 
         // cursor movement keys
-        // .ARROW_UP,
-        // .ARROW_DOWN,
-        .ARROW_RIGHT,
-        .ARROW_LEFT,
-        => |c| {
+        .ARROW_UP, .ARROW_DOWN, .ARROW_RIGHT, .ARROW_LEFT => |c| {
             _ = try Visual.move(e, c);
         },
 

@@ -16,6 +16,7 @@ const Commands = union(enum(u8)) {
     _,
 };
 
+// [RANGE][COMMAND][ARGS] [OPTS]
 const command_map = std.StaticStringMap(Commands).initComptime(
     .{ "r", .read },
     .{ "read", .read },
@@ -23,6 +24,8 @@ const command_map = std.StaticStringMap(Commands).initComptime(
     .{ "write", .write },
     .{ "q", .quit },
     .{ "quit", .quit },
+    .{ "m", .move },
+    .{ "move", .move },
 );
 
 pub fn actions(e: *Editor) !bool {

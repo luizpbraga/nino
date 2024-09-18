@@ -222,7 +222,7 @@ pub fn refreshScreen(e: *Editor) !void {
     try e.buffer.appendSlice("\x1b[H");
 
     // TODO: put this in another way
-    if (SETNUMBER) LEFTSPACE = std.fmt.count(" {}  ", .{e.screen.y + e.offset.y});
+    if (SETNUMBER) LEFTSPACE = std.fmt.count(" {} ", .{e.screen.y + e.offset.y});
 
     try e.drawRows();
     try e.drawStatusBar();
@@ -361,11 +361,12 @@ pub fn drawRows(e: *Editor) !void {
 
             if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
 
+            // TODO: relative numbers
             if (SETNUMBER) {
                 var size = e.buffer.items.len;
-                try e.buffer.writer().print(" \x1b[3m{}\x1b[0m  ", .{file_row});
-                const italic_scape_size = 8;
-                size = e.buffer.items.len - size - italic_scape_size;
+                try e.buffer.writer().print(" \x1b[90m{}\x1b[0m ", .{file_row});
+                const escape_size = 9;
+                size = e.buffer.items.len - size - escape_size;
                 if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
             }
 

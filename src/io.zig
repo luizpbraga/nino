@@ -141,7 +141,7 @@ pub fn save(e: *Editor) !void {
 
     e.file_status = 0;
 
-    try e.setStatusMsg("\"{s}\" {}L, {}B written", .{ e.file_name, e.numOfRows(), rows.len });
+    try e.prompt.setStatusMsg("\"{s}\" {}L, {}B written", .{ e.file_name, e.numOfRows(), rows.len });
 }
 
 pub fn exit() !void {

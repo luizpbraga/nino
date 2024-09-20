@@ -31,27 +31,27 @@ const command_map = std.StaticStringMap(Commands).initComptime(
 pub fn actions(e: *Editor) !bool {
     defer e.mode = .normal;
 
-    const command = try e.prompt(":{s}") orelse {
+    const command = try e.prompt.capture() orelse {
         return false;
     };
-    defer e.alloc.free(command);
+    //defer e.alloc.free(command);
 
     const cmd = trim(u8, command, " \t");
 
     if (eql(u8, cmd, "help")) {
-        try e.setStatusMsg("help not available KKKKKKKK", .{});
+        try e.prompt.setStatusMsg("help not available KKKKKKKK", .{});
         return false;
     }
 
     if (eql(u8, cmd, "poem")) {
-        try e.setStatusMsg("Poeminho do Contra\n\roi\n\rtchau", .{});
+        try e.prompt.setStatusMsg("Poeminho do Contra\n\roi\n\rtchau", .{});
         return false;
     }
 
     if (eql(u8, cmd, "num")) {
         Editor.SETNUMBER = !Editor.SETNUMBER;
         Editor.LEFTSPACE = 0;
-        try e.setStatusMsg("setnumbers = {}", .{Editor.SETNUMBER});
+        try e.prompt.setStatusMsg("setnumbers = {}", .{Editor.SETNUMBER});
         try e.refreshScreen();
         return false;
     }
@@ -59,10 +59,10 @@ pub fn actions(e: *Editor) !bool {
     if (startsWith(u8, cmd, "r ")) {
         const file = cmd[2..];
         io.read(e, file) catch |err| switch (err) {
-            error.FileNotFound, error.AccessDenied => try e.setStatusMsg("Warn: read not implemented", .{}),
+            error.FileNotFound, error.AccessDenied => try e.prompt.setStatusMsg("Warn: read not implemented", .{}),
             else => return err,
         };
-        try e.setStatusMsg("\"{s}\" [noeol] <TODO>L, <TODO>B", .{file});
+        try e.prompt.setStatusMsg("\"{s}\" [noeol] <TODO>L, <TODO>B", .{file});
         return false;
     }
 
@@ -71,7 +71,7 @@ pub fn actions(e: *Editor) !bool {
             try io.exit();
             return true;
         }
-        try e.setStatusMsg("Warn: unsaved changes. Use ':q!' to force quit", .{});
+        try e.prompt.setStatusMsg("Warn: unsaved changes. Use ':q!' to force quit", .{});
         return false;
     }
 
@@ -82,12 +82,12 @@ pub fn actions(e: *Editor) !bool {
 
     if (eql(u8, cmd, "w") or eql(u8, cmd, "write")) {
         if (e.file_name.len == 0) {
-            try e.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
+            try e.prompt.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
             return false;
         }
 
         if (e.file_status == 0) {
-            try e.setStatusMsg("Warn: Nothing to write", .{});
+            try e.prompt.setStatusMsg("Warn: Nothing to write", .{});
             return false;
         }
 
@@ -97,7 +97,7 @@ pub fn actions(e: *Editor) !bool {
 
     if (eql(u8, cmd, "wq")) {
         if (e.file_name.len == 0) {
-            try e.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
+            try e.prompt.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
             return false;
         }
         try io.save(e);
@@ -114,7 +114,7 @@ pub fn actions(e: *Editor) !bool {
         const name = cmd[2..];
 
         if (io.fileExists(name) and !eql(u8, name, e.file_name)) {
-            try e.setStatusMsg("Error: File exists", .{});
+            try e.prompt.setStatusMsg("Error: File exists", .{});
             return false;
         }
 
@@ -132,7 +132,7 @@ pub fn actions(e: *Editor) !bool {
     }
 
     if (eql(u8, cmd, "statusbar")) {
-        try e.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
+        try e.prompt.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
         return false;
     }
 
@@ -147,7 +147,7 @@ pub fn actions(e: *Editor) !bool {
             e.screen.y += 1;
         }
 
-        try e.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
+        try e.prompt.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
         return false;
     }
 
@@ -161,7 +161,7 @@ pub fn actions(e: *Editor) !bool {
             try list.writer().print("{} {} {any}\n", .{ mode, key, keys });
         }
         _ = list.pop();
-        try e.setStatusMsg("{s}", .{list.items});
+        try e.prompt.setStatusMsg("{s}", .{list.items});
         return false;
     }
 
@@ -174,6 +174,6 @@ pub fn actions(e: *Editor) !bool {
         return false;
     }
 
-    try e.setStatusMsg("Not an editor command: {s}", .{cmd});
+    try e.prompt.setStatusMsg("Not an editor command: {s}", .{cmd});
     return false;
 }

@@ -39,5 +39,18 @@ pub fn main() !void {
 }
 
 test "simple test" {
-    std.debug.print("FUCK PYTHON", .{});
+    const stdout_file = std.io.getStdOut().writer();
+    var bw = std.io.bufferedWriter(stdout_file);
+    const stdout = bw.writer();
+    try bw.flush();
+    //const alloc = std.testing.allocator;
+    //var edi: Editor = try .init(alloc);
+    //defer edi.deinit();
+    //try Terminal.initRawMode(&edi);
+    //defer Terminal.deinitRawMode(&edi);
+    // try edi.getWindowSize();
+    try stdout.writeAll("\x1b[K");
+    try bw.flush();
+    // try writer.print("\x1b[{[x]},{[y]}H", edi.screen);
+    // try writer.print("\x1b[K", .{});
 }

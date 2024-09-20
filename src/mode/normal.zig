@@ -102,7 +102,7 @@ pub fn actions(e: *Editor) !bool {
             .@"0", .@"1", .@"2", .@"3", .@"4", .@"5", .@"6", .@"7", .@"8", .@"9" => |c| {
                 if (number.len != 10) {
                     try number.appendSlice(@tagName(c));
-                    try e.setStatusMsg("{s}", .{number.slice()});
+                    try e.prompt.setStatusMsg("{s}", .{number.slice()});
                     try e.refreshScreen(); // todo: update refresPrompt
                 }
                 kkk = @enumFromInt(try io.readKey());

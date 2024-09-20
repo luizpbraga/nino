@@ -10,7 +10,7 @@ const Key = keys.Key;
 const KeyMap = keys.KeyMap;
 const Row = @import("Row.zig");
 const Status = @import("Status.zig");
-
+const Prompt = @import("Prompt.zig");
 pub const Mode = enum { normal, insert, visual, command };
 
 const io = @import("io.zig");
@@ -63,7 +63,7 @@ offset: Coordinate = .{},
 /// screen display
 screen: Coordinate = .{},
 /// status message
-status: Status = .{},
+//status: Status = .{},
 /// this little guy will hold the initial state
 orig_termios: linux.termios,
 /// espace sequece + line buffer
@@ -80,6 +80,8 @@ file_status: usize = 0,
 mode: Mode = .normal,
 /// remapping
 keyremap: KeyMap,
+/// menssages and commands
+prompt: Prompt,
 
 /// Read the current terminal attributes into raw
 /// and save the terminal state
@@ -94,11 +96,14 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         .alloc = alloc,
         .row = .init(alloc),
         .buffer = .init(alloc),
+        .prompt = .init(alloc),
         .keyremap = .init(alloc),
         .orig_termios = orig_termios,
     };
 
     try e.getWindowSize();
+
+    e.prompt.cursor.y = e.screen.y + STATUSBAR + 1;
 
     return e;
 }
@@ -113,6 +118,7 @@ pub fn deinit(e: *Editor) void {
     e.buffer.deinit();
     e.keyremap.deinit();
     if (ALLOCNAME) e.alloc.free(e.file_name);
+    e.prompt.deinit();
 }
 
 pub fn processKeyPressed(e: *Editor) !bool {
@@ -137,10 +143,6 @@ pub fn rowAt(e: *Editor, at: usize) *Row {
 
 pub fn numOfRows(e: *Editor) usize {
     return e.row.items.len;
-}
-
-pub fn setStatusMsg(e: *Editor, comptime fmt: []const u8, args: anytype) !void {
-    if (fmt.len != 0) e.status = try Status.new(fmt, args);
 }
 
 pub fn toString(e: *Editor) ![]const u8 {
@@ -213,12 +215,6 @@ pub fn refreshScreen(e: *Editor) !void {
     defer e.buffer.clearAndFree();
 
     e.scroll();
-
-    // hide the cursor
-    // try e.buffer.appendSlice("\x1b[?25l");
-    // clear all [2J:
-    // try edi.buffer.appendSlice("\x1b[2J"); // let's use \x1b[K instead
-    // reposition the cursor at the top-left corner; H command (Cursor Position)
     try e.buffer.appendSlice("\x1b[H");
 
     // TODO: put this in another way
@@ -226,38 +222,12 @@ pub fn refreshScreen(e: *Editor) !void {
 
     try e.drawRows();
     try e.drawStatusBar();
-    try e.drawMsgBar();
 
-    // cursor to the top-left try edi.buffer.appendSlice("\x1b[H");
-    // move the cursor
-    // e.cursor.y now referees to the position of the cursor within file
     try e.buffer.writer().print("\x1b[{};{}H", .{
         e.cursor.y - e.offset.y + 1,
         LEFTSPACE + e.cursor.rx - e.offset.x + 1,
     });
 
-    // show the cursor
-    // try e.buffer.appendSlice("\x1b[?25h");
-    try stdout.writeAll(e.buffer.items);
-}
-
-pub fn refreshPrompt(e: *Editor) !void {
-    defer e.buffer.clearAndFree();
-
-    try e.buffer.appendSlice("\x1b[?25l\x1b[H");
-
-    // try e.getWindowSize();
-    try e.drawRows();
-    try e.drawStatusBar();
-    try e.drawMsgBar();
-
-    try e.buffer.writer().print("\x1b[{};{}H\x1b[?25h", .{
-        e.screen.y + TABSTOP,
-        e.cursor.x + 1,
-    });
-
-    // show the cursor
-    try e.buffer.appendSlice("");
     try stdout.writeAll(e.buffer.items);
 }
 
@@ -287,20 +257,6 @@ pub fn drawWellcomeScreen(e: *Editor) !void {
     }
 
     try e.buffer.appendSlice(WELLCOME_STRING);
-}
-
-pub fn drawMsgBar(e: *Editor) !void {
-    // clear the bar
-    try e.buffer.appendSlice("\x1b[K");
-    const msg = e.status.msg;
-    if (msg.len == 0) return;
-
-    if (std.time.timestamp() - e.status.time < 4) {
-        try e.buffer.appendSlice(&msg);
-        STATUSBAR += std.mem.count(u8, &msg, "\n");
-    } else {
-        STATUSBAR = 2;
-    }
 }
 
 pub fn drawStatusBar(e: *Editor) !void {
@@ -358,7 +314,6 @@ pub fn drawRows(e: *Editor) !void {
         } else {
             const renders = e.row.items[file_row].render.items;
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
-
             if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
 
             // TODO: relative numbers
@@ -376,7 +331,6 @@ pub fn drawRows(e: *Editor) !void {
                 var i: usize = 0;
                 while (i < x) : (i += 1) {
                     if (e.offset.x + i == renders.len) {
-                        try e.setStatusMsg("{} {}", .{ i, e.offset.x });
                         break;
                     }
                     try e.buffer.append(renders[e.offset.x + i]);
@@ -538,59 +492,4 @@ pub fn rowAppendString(e: *Editor, row: *Row, string: []const u8) !void {
     defer e.file_status += 1;
     try row.chars.appendSlice(string);
     try updateRow(row);
-}
-
-/// displays a prompt in the status bar & and lets the user input a line
-/// after the prompt
-/// callow own the memory
-/// TODO: make prompt and command diff things
-pub fn prompt(e: *Editor, comptime prompt_fmt: []const u8) !?[]const u8 {
-    var input: std.ArrayList(u8) = .init(e.alloc);
-    defer input.deinit();
-    const prev_cursor = e.cursor;
-    defer {
-        e.cursor.x = prev_cursor.x;
-        e.cursor.y = prev_cursor.y;
-        e.cursor.rx = prev_cursor.rx;
-    }
-
-    e.cursor.rx = 0;
-    e.cursor.x = 1;
-
-    while (true) {
-        try e.setStatusMsg(prompt_fmt, .{input.items});
-        try e.refreshPrompt();
-
-        switch (try readKey()) {
-            '\x1b' => {
-                try e.setStatusMsg("", .{});
-                return null;
-            },
-
-            127 => {
-                if (input.items.len != 0) {
-                    _ = input.pop();
-                    e.cursor.x -= 1;
-                }
-            },
-
-            '\r' => if (input.items.len != 0) {
-                try e.setStatusMsg("", .{});
-                return try input.toOwnedSlice();
-            },
-
-            @intFromEnum(Key.ARROW_LEFT) => if (e.cursor.x != 1) {
-                e.cursor.x -= 1;
-            },
-
-            @intFromEnum(Key.ARROW_RIGHT) => if (e.cursor.x <= input.items.len) {
-                e.cursor.x += 1;
-            },
-
-            else => |c| if (c >= 0 and c < 128) {
-                try input.append(@intCast(c));
-                e.cursor.x += 1;
-            },
-        }
-    }
 }

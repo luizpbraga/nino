@@ -89,7 +89,7 @@ pub fn readKey() !usize {
 pub fn open(e: *Editor, file_name: []const u8) !void {
     const cwd = std.fs.cwd();
     var file = cwd.openFile(file_name, .{ .mode = .read_write }) catch |err| switch (err) {
-        error.FileNotFound => try cwd.createFile(file_name, .{}),
+        error.FileNotFound => return create(e, file_name),
         else => return err,
     };
     defer file.close();
@@ -102,6 +102,15 @@ pub fn open(e: *Editor, file_name: []const u8) !void {
         try e.insertRow(e.numOfRows(), line);
     }
 
+    e.file_name = file_name;
+    e.file_status = 0;
+}
+
+pub fn create(e: *Editor, file_name: []const u8) !void {
+    const cwd = std.fs.cwd();
+    var file = try cwd.createFile(file_name, .{});
+    defer file.close();
+    try e.insertRow(e.numOfRows(), "");
     e.file_name = file_name;
     e.file_status = 0;
 }

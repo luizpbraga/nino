@@ -109,7 +109,7 @@ pub fn capture(p: *Prompt) !?[]const u8 {
                 p.cursor.x -= 1;
             },
 
-            @intFromEnum(Key.ARROW_UP) => {
+            @intFromEnum(Key.ARROW_UP), @intFromEnum(Key.ARROW_DOWN) => |c| {
                 if (p.cmds.items.len != 0) {
                     if (input.items.len > start) {
                         input.clearAndFree();
@@ -117,9 +117,14 @@ pub fn capture(p: *Prompt) !?[]const u8 {
                     }
                     const cmd = p.cmds.items[p.ccouter];
                     try input.appendSlice(cmd[start..]);
-                    p.ccouter += 1;
-                    if (p.ccouter == p.cmds.items.len) p.ccouter = 0;
-                    p.cursor.x = input.items.len - start + 1;
+
+                    if (c == @intFromEnum(Key.ARROW_UP)) {
+                        p.ccouter += 1;
+                        if (p.ccouter == p.cmds.items.len) p.ccouter = 0;
+                        p.cursor.x = input.items.len - start + 1;
+                    } else {
+                        if (p.ccouter != 0) p.ccouter -= 1 else p.ccouter = p.cmds.items.len - 1;
+                    }
                 }
             },
 

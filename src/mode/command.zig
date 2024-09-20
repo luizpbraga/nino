@@ -174,6 +174,6 @@ pub fn actions(e: *Editor) !bool {
         return false;
     }
 
-    try e.prompt.setStatusMsg("Not an editor command: {s}", .{cmd});
+    try e.prompt.setStatusMsg("\x1b[31mNot an editor command: {s}\x1b[0m", .{cmd});
     return false;
 }

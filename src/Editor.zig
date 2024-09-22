@@ -22,13 +22,8 @@ const Visual = visual.Visual;
 
 /// deals with low-level terminal input and mapping
 const Editor = @This();
-const VERSION = "0.0.2";
+const VERSION = "0.0.3";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
-
-pub const CTRL_Z = controlKey('z');
-pub const CTRL_L = controlKey('l');
-pub const CTRL_H = controlKey('h');
-pub const CTRL_S = controlKey('s');
 
 // highlight
 //https://pygments.org/
@@ -36,6 +31,7 @@ pub var LEFTSPACE: usize = 0;
 pub var SETNUMBER = true;
 pub var TABSTOP: usize = 4;
 pub var STATUSBAR: usize = 2;
+pub var DEFAULT_STATUS_SIZE: usize = 2;
 pub var ALLOCNAME = false;
 /// SORRY ABOUT THIS
 pub var SETMOUSE = false;
@@ -103,7 +99,9 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
 
     try e.getWindowSize();
 
-    e.prompt.cursor.y = e.screen.y + STATUSBAR + 1;
+    e.prompt.cursor.y = e.screen.y + 1;
+    e.prompt.screen.x = e.screen.x;
+    e.prompt.screen.y = e.screen.y;
 
     return e;
 }
@@ -150,7 +148,6 @@ pub fn toString(e: *Editor) ![]const u8 {
     errdefer list.deinit();
     for (e.row.items) |row| {
         try list.writer().print("{s}\n", .{row.chars.items});
-        STATUSBAR += 1;
     }
     _ = list.popOrNull();
     return list.toOwnedSlice();
@@ -218,11 +215,11 @@ pub fn refreshScreen(e: *Editor) !void {
     try e.buffer.appendSlice("\x1b[H");
 
     // TODO: put this in another way
-    if (SETNUMBER) LEFTSPACE = std.fmt.count(" {} ", .{e.screen.y + e.offset.y});
+    if (SETNUMBER) LEFTSPACE = std.fmt.count(" {} ", .{e.editorSize() + e.offset.y});
 
     try e.drawRows();
     try e.drawStatusBar();
-
+    try e.prompt.draw();
     try e.buffer.writer().print("\x1b[{};{}H", .{
         e.cursor.y - e.offset.y + 1,
         LEFTSPACE + e.cursor.rx - e.offset.x + 1,
@@ -240,7 +237,10 @@ pub fn getWindowSize(e: *Editor) !void {
     }
     e.screen.y = ws.row;
     e.screen.x = ws.col;
-    e.screen.y -= STATUSBAR;
+}
+
+fn editorSize(e: *Editor) usize {
+    return e.screen.y - STATUSBAR;
 }
 
 pub fn drawWellcomeScreen(e: *Editor) !void {
@@ -267,7 +267,7 @@ pub fn drawStatusBar(e: *Editor) !void {
     const page_percent = b: {
         const yf: f64 = @floatFromInt(e.cursor.y);
         const nr: f64 = @floatFromInt(e.numOfRows());
-        break :b 100 * yf / nr;
+        break :b if (nr == 0) 0 else 100 * yf / nr;
     };
 
     var lstatus: [80]u8 = undefined;
@@ -294,19 +294,20 @@ pub fn drawStatusBar(e: *Editor) !void {
     try e.buffer.appendSlice(rstatus[0..rlen]);
 
     // reswitch colors
-    try e.buffer.appendSlice("\x1b[0m\r\n");
+    try e.buffer.appendSlice("\x1b[0m");
 }
 
 /// draw a column of (~) on the left hand side at the beginning of any line til EOF
 /// using the characters within the render display
 /// TODO: Clear lines one at a time
 pub fn drawRows(e: *Editor) !void {
-    for (0..e.screen.y) |y| {
+    const screenY = e.editorSize();
+    for (0..screenY) |y| {
         const file_row = y + e.offset.y;
 
         if (file_row >= e.numOfRows()) {
             // prints the WELLCOME_STRING if where is no input file
-            if (e.numOfRows() == 0 and y == e.screen.y / 3) {
+            if (e.numOfRows() == 0 and y == screenY / 3) {
                 try e.drawWellcomeScreen();
             } else {
                 try e.buffer.append('~');
@@ -340,8 +341,7 @@ pub fn drawRows(e: *Editor) !void {
             }
         }
         // clear each line as we redraw them
-        try e.buffer.appendSlice("\x1b[K");
-        _ = try e.buffer.appendSlice("\r\n");
+        try e.buffer.appendSlice("\x1b[K\r\n");
     }
 }
 
@@ -350,7 +350,8 @@ pub fn scroll(e: *Editor) void {
     // checks if the cursor is above the visible window; if so, scrool up
     if (e.cursor.y < e.offset.y) e.offset.y = e.cursor.y;
     // checks if the cursor is above the bottom of the visible windows
-    if (e.cursor.y >= e.offset.y + e.screen.y) e.offset.y = e.cursor.y - e.screen.y + 1;
+    const screenY = e.editorSize();
+    if (e.cursor.y >= e.offset.y + screenY) e.offset.y = e.cursor.y - screenY + 1;
     // same shit to x
     if (e.cursor.rx < e.offset.x) e.offset.x = e.cursor.rx;
     if (e.cursor.rx + LEFTSPACE >= e.offset.x + e.screen.x) e.offset.x = LEFTSPACE + e.cursor.rx - e.screen.x + 1;

@@ -28,7 +28,7 @@ pub fn actions(e: *Editor) !bool {
         l: switch (kkk) {
             .ENTER => try e.insertNewLine(),
 
-            Editor.CTRL_Z => {
+            controlKey('z') => {
                 try io.exit();
                 return true;
             },

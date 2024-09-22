@@ -82,7 +82,7 @@ pub fn actions(e: *Editor) !bool {
 
     if (eql(u8, cmd, "w") or eql(u8, cmd, "write")) {
         if (e.file_name.len == 0) {
-            try e.prompt.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
+            try e.prompt.setStatusMsg("\x1b[31mError: Cannot write IF YOU DONT PROVIDE A FILE NAME!\x1b[0m", .{});
             return false;
         }
 
@@ -97,7 +97,7 @@ pub fn actions(e: *Editor) !bool {
 
     if (eql(u8, cmd, "wq")) {
         if (e.file_name.len == 0) {
-            try e.prompt.setStatusMsg("Error: Cannot write IF YOU DONT PROVIDE A FILE NAME!", .{});
+            try e.prompt.setStatusMsg("\x1b[31mError: Cannot write IF YOU DONT PROVIDE A FILE NAME!\x1b[0m", .{});
             return false;
         }
         try io.save(e);
@@ -114,7 +114,7 @@ pub fn actions(e: *Editor) !bool {
         const name = cmd[2..];
 
         if (io.fileExists(name) and !eql(u8, name, e.file_name)) {
-            try e.prompt.setStatusMsg("Error: File exists", .{});
+            try e.prompt.setStatusMsg("\x1b[31mError: File exists\x1b[0m", .{});
             return false;
         }
 
@@ -131,23 +131,20 @@ pub fn actions(e: *Editor) !bool {
         return false;
     }
 
-    if (eql(u8, cmd, "statusbar")) {
-        try e.prompt.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
-        return false;
-    }
-
-    if (startsWith(u8, cmd, "stat")) {
-        if (startsWith(u8, cmd[4..], "+")) {
-            Editor.STATUSBAR += 1;
-            e.screen.y -= 1;
+    if (startsWith(u8, cmd, "s")) {
+        if (startsWith(u8, cmd[1..], "+")) {
+            Editor.DEFAULT_STATUS_SIZE += 1;
+            // e.screen.y -= 1;
         }
 
-        if (startsWith(u8, cmd[4..], "-")) {
-            Editor.STATUSBAR -= 1;
-            e.screen.y += 1;
+        if (startsWith(u8, cmd[1..], "-")) {
+            Editor.DEFAULT_STATUS_SIZE -= 1;
+            // e.screen.y += 1;
         }
 
-        try e.prompt.setStatusMsg("statusbar = {} ", .{Editor.STATUSBAR});
+        Editor.STATUSBAR = Editor.DEFAULT_STATUS_SIZE;
+
+        try e.prompt.setStatusMsg("statusbar:{},screen:{}", .{ Editor.DEFAULT_STATUS_SIZE, e.screen.y });
         return false;
     }
 

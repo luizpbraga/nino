@@ -17,7 +17,7 @@ pub fn actions(e: *Editor) !bool {
 
         .ESC => e.mode = .normal,
 
-        .BACKSPACE, Editor.CTRL_H => try e.deleteChar(),
+        .BACKSPACE, controlKey('h') => try e.deleteChar(),
 
         .DEL => {
             e.moveCursor(@intFromEnum(Key.ARROW_RIGHT));

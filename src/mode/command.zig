@@ -34,9 +34,12 @@ pub fn actions(e: *Editor) !bool {
     const command = try e.prompt.capture() orelse {
         return false;
     };
-    //defer e.alloc.free(command);
+    const cmd = trim(u8, command, " \t\r\n");
 
-    const cmd = trim(u8, command, " \t");
+    if (eql(u8, cmd, "n")) {
+        try e.prompt.setStatusMsg("nrows:{}", .{e.numOfRows()});
+        return false;
+    }
 
     if (eql(u8, cmd, "help")) {
         try e.prompt.setStatusMsg("help not available KKKKKKKK", .{});

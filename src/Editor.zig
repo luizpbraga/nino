@@ -1,34 +1,28 @@
 const std = @import("std");
 const linux = std.os.linux;
 const stdout = std.io.getStdOut();
-const command = @import("mode/command.zig");
 const visual = @import("mode/visual.zig");
 const insert = @import("mode/insert.zig");
 const normal = @import("mode/normal.zig");
+const command = @import("mode/command.zig");
 const keys = @import("keys.zig");
 const Key = keys.Key;
 const KeyMap = keys.KeyMap;
 const Row = @import("Row.zig");
-const Status = @import("Status.zig");
 const Prompt = @import("Prompt.zig");
-pub const Mode = enum { normal, insert, visual, command };
-
 const io = @import("io.zig");
 const readKey = io.readKey;
 const asKey = keys.asKey;
-const controlKey = keys.controlKey;
-
 const Visual = visual.Visual;
+const Highlight = @import("syntax.zig").HighLight;
 
 /// deals with low-level terminal input and mapping
 const Editor = @This();
 const VERSION = "0.0.3";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 
-// highlight
-//https://pygments.org/
 pub var LEFTSPACE: usize = 0;
-pub var SETNUMBER = true;
+pub var SETNUMBER = false;
 pub var TABSTOP: usize = 4;
 pub var STATUSBAR: usize = 2;
 pub var DEFAULT_STATUS_SIZE: usize = 2;
@@ -44,6 +38,7 @@ const Config = struct {
     staturbar: struct { allow: bool = true, size: usize = 2 } = .{},
 };
 
+pub const Mode = enum { normal, insert, visual, command };
 /// 2d point Coordinate
 const Coordinate = struct { x: usize = 0, y: usize = 0 };
 /// x, y: index into the chars in a row
@@ -58,8 +53,6 @@ cursor: CursorCoordinate = .{},
 offset: Coordinate = .{},
 /// screen display
 screen: Coordinate = .{},
-/// status message
-//status: Status = .{},
 /// this little guy will hold the initial state
 orig_termios: linux.termios,
 /// espace sequece + line buffer
@@ -78,7 +71,8 @@ mode: Mode = .normal,
 keyremap: KeyMap,
 /// menssages and commands
 prompt: Prompt,
-
+///
+hl: Highlight,
 /// Read the current terminal attributes into raw
 /// and save the terminal state
 pub fn init(alloc: std.mem.Allocator) !Editor {
@@ -95,6 +89,7 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         .prompt = .init(alloc),
         .keyremap = .init(alloc),
         .orig_termios = orig_termios,
+        .hl = try .init(alloc, Highlight.zig_ctx),
     };
 
     try e.getWindowSize();
@@ -117,6 +112,7 @@ pub fn deinit(e: *Editor) void {
     e.keyremap.deinit();
     if (ALLOCNAME) e.alloc.free(e.file_name);
     e.prompt.deinit();
+    e.hl.deinit(e.alloc);
 }
 
 pub fn processKeyPressed(e: *Editor) !bool {
@@ -212,11 +208,8 @@ pub fn refreshScreen(e: *Editor) !void {
     defer e.buffer.clearAndFree();
 
     e.scroll();
-    try e.buffer.appendSlice("\x1b[H");
-
     // TODO: put this in another way
     if (SETNUMBER) LEFTSPACE = std.fmt.count(" {} ", .{e.editorSize() + e.offset.y});
-
     try e.drawRows();
     try e.drawStatusBar();
     try e.prompt.draw();
@@ -301,6 +294,9 @@ pub fn drawStatusBar(e: *Editor) !void {
 /// using the characters within the render display
 /// TODO: Clear lines one at a time
 pub fn drawRows(e: *Editor) !void {
+    try e.buffer.appendSlice("\x1b[H");
+    const b1 = e.buffer.items.len;
+    _ = b1; // autofix
     const screenY = e.editorSize();
     for (0..screenY) |y| {
         const file_row = y + e.offset.y;
@@ -337,9 +333,15 @@ pub fn drawRows(e: *Editor) !void {
                     try e.buffer.append(renders[e.offset.x + i]);
                 }
             } else {
-                for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
+                var list = try e.alloc.allocSentinel(u8, len, 0);
+                defer e.alloc.free(list);
+                for (0..len) |i| list[i] = renders[e.offset.x + i];
+                // for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
+                try e.hl.illuminate(&e.buffer, list);
+                // try e.buffer.appendSlice(list);
             }
         }
+
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K\r\n");
     }
@@ -377,7 +379,7 @@ pub fn moveCursor(e: *Editor, key: usize) void {
         },
 
         // scroll logic
-        asKey('j'), .ARROW_DOWN => if (e.cursor.y < e.numOfRows()) {
+        asKey('j'), .ARROW_DOWN => if (e.cursor.y + 1 < e.numOfRows()) {
             e.cursor.y += 1;
         },
 

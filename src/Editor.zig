@@ -14,15 +14,16 @@ const io = @import("io.zig");
 const readKey = io.readKey;
 const asKey = keys.asKey;
 const Visual = visual.Visual;
-const Highlight = @import("syntax.zig").HighLight;
+const Highlight = @import("Highlight.zig");
 
 /// deals with low-level terminal input and mapping
 const Editor = @This();
 const VERSION = "0.0.3";
 const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 
+pub var SETLIGHT = true;
 pub var LEFTSPACE: usize = 0;
-pub var SETNUMBER = false;
+pub var SETNUMBER = true;
 pub var TABSTOP: usize = 4;
 pub var STATUSBAR: usize = 2;
 pub var DEFAULT_STATUS_SIZE: usize = 2;
@@ -72,7 +73,7 @@ keyremap: KeyMap,
 /// menssages and commands
 prompt: Prompt,
 ///
-hl: Highlight,
+hl: ?Highlight = null,
 /// Read the current terminal attributes into raw
 /// and save the terminal state
 pub fn init(alloc: std.mem.Allocator) !Editor {
@@ -89,7 +90,6 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         .prompt = .init(alloc),
         .keyremap = .init(alloc),
         .orig_termios = orig_termios,
-        .hl = try .init(alloc, Highlight.zig_ctx),
     };
 
     try e.getWindowSize();
@@ -99,6 +99,10 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
     e.prompt.screen.y = e.screen.y;
 
     return e;
+}
+
+pub fn setLight(e: *Editor, file_name: []const u8) !void {
+    e.hl = try Highlight.init(e.alloc, file_name);
 }
 
 pub fn deinit(e: *Editor) void {
@@ -112,7 +116,7 @@ pub fn deinit(e: *Editor) void {
     e.keyremap.deinit();
     if (ALLOCNAME) e.alloc.free(e.file_name);
     e.prompt.deinit();
-    e.hl.deinit(e.alloc);
+    if (e.hl) |*hl| hl.deinit(e.alloc);
 }
 
 pub fn processKeyPressed(e: *Editor) !bool {
@@ -333,12 +337,14 @@ pub fn drawRows(e: *Editor) !void {
                     try e.buffer.append(renders[e.offset.x + i]);
                 }
             } else {
-                var list = try e.alloc.allocSentinel(u8, len, 0);
-                defer e.alloc.free(list);
-                for (0..len) |i| list[i] = renders[e.offset.x + i];
-                // for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
-                try e.hl.illuminate(&e.buffer, list);
-                // try e.buffer.appendSlice(list);
+                if (e.hl) |*hl| {
+                    var list = try e.alloc.allocSentinel(u8, len, 0);
+                    defer e.alloc.free(list);
+                    for (0..len) |i| list[i] = renders[e.offset.x + i];
+                    try hl.illuminate(&e.buffer, list);
+                } else {
+                    for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
+                }
             }
         }
 

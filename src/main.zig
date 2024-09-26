@@ -23,6 +23,7 @@ pub fn main() !void {
     _ = arg.skip();
     if (arg.next()) |file_name| {
         try io.open(&edi, file_name);
+        try edi.setLight(file_name);
     }
 
     // vim map ex

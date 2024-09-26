@@ -1,4 +1,5 @@
 # nino
+
 A terminal-based text editor similar to Vim, with multiple modes implemented. The editor currently supports:
 1. Insert Mode: Users can type and insert text directly.
 2. Normal Mode: Standard mode for navigating and issuing commands.
@@ -7,7 +8,9 @@ A terminal-based text editor similar to Vim, with multiple modes implemented. Th
 
 The project is still in progress, and further improvements to visual mode and other features may be necessary.
 
-#### Build and run (recommend)
+![NINO](./images/nino_v0.0.3.png)
+
+#### Build and run
 Using zig master
 > zig build run
 

@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run nino");
     run_step.dependOn(&run_cmd.step);
 
+    // TODO:
     // const lib_unit_tests = b.addTest(.{
     //     .root_source_file = b.path("src/root.zig"),
     //     .target = target,

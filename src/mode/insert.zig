@@ -54,7 +54,7 @@ pub fn actions(e: *Editor) !bool {
 
         .HOME => e.cursor.x = 0,
 
-        .END => if (e.cursor.y < e.numOfRows()) {
+        .END => if (e.cursor.y + 1 < e.numOfRows()) {
             const chars = e.row.items[e.cursor.y].chars.items;
             e.cursor.x = chars.len;
         },

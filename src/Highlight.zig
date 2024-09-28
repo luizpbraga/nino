@@ -75,11 +75,6 @@ pub fn init(alloc: std.mem.Allocator, file_ext: ?[]const u8) !?HighLight {
 }
 
 pub fn deinit(r: *HighLight, alloc: std.mem.Allocator) void {
-    // for (r.slice) |mem| {
-    //     c.regfree(@ptrCast(mem));
-    //     alloc.free(mem);
-    // }
-    //
     const f = r.getSyntaxInfo();
     for (std.meta.tags(Tag)) |tag| {
         const mem = r.slice[@intFromEnum(tag)];
@@ -118,6 +113,34 @@ pub fn illuminate(r: *HighLight, buffer: *std.ArrayList(u8), code: []const u8) !
                 const info = matches[i.group];
                 const sof: usize = @intCast(info.rm_so);
                 const eof: usize = @intCast(info.rm_eo);
+                if (start > code.len) break;
+                const txt = code[start..][sof..eof];
+                try addColor(buffer, txt, i.color);
+                start += eof;
+                continue :loop;
+            }
+        }
+
+        try buffer.append(code[start]);
+        start += 1;
+    }
+}
+
+pub fn illuminateAll(r: *HighLight, buffer: *std.ArrayList(u8)) !void {
+    var matches: [2]c.regmatch_t = undefined;
+    var start: usize = 0;
+    const sinfo = r.getSyntaxInfo();
+
+    const code = try buffer.allocator.dupeZ(u8, buffer.items);
+    defer buffer.allocator.free(code);
+
+    loop: while (start < code.len) {
+        for (std.meta.tags(Tag)) |tag| {
+            const i = sinfo.get(tag) orelse continue;
+            if (0 == c.regexec(r.regexxx(tag), code[start..].ptr, i.group + 1, &matches, 0) and matches[0].rm_so == 0) {
+                const info = matches[i.group];
+                const sof: usize = @intCast(info.rm_so);
+                const eof: usize = @intCast(info.rm_eo);
                 const txt = code[start..][sof..eof];
                 try addColor(buffer, txt, i.color);
                 start += eof;
@@ -136,7 +159,7 @@ const ZIG_SYNTAX_INFO: FileSyntaxInfo = blk: {
     const number_pattern = "\\b([0-9]+(\\.[0-9]+)?)";
     const buildin_pattern = "(@[a-zA-Z]+)\\(";
     const comment_pattern = "//?/[^\n]*";
-    const keywords_pattern = "\\b(else|errdefer|continue|break|test|inline|pub|fn|const|var|defer|try|return|catch|extern|struct|enum|packed|if|switch|while|for|\\sand\\s|\\sor\\s)\\b";
+    const keywords_pattern = "\\b(else|orelse|errdefer|continue|break|test|inline|pub|fn|const|var|defer|try|return|catch|extern|struct|enum|packed|if|switch|while|for|\\sand\\s|\\sor\\s)\\b";
     const operators_pattern = "(\\+|\\-|\\*|\\*\\*|\\s/\\s|&|%|<|>|=|<=|>=|==|!=|!|\\?)";
     const keywords2_patterns = "\\b(undefined|null|[A-Z_]+)\\b";
     break :blk .init(.{

@@ -84,11 +84,40 @@ pub fn actions(e: *Editor) !bool {
                 e.cursor.x = chars.len;
             },
 
+            asKey('n') => if (e.search.meta) |meta| {
+                e.cursor.y = meta[e.search.cursor].line;
+                e.cursor.x = meta[e.search.cursor].start;
+                try e.prompt.setStatusMsg("[{}/{}]", .{ meta[e.search.cursor].counter + 1, meta[meta.len - 1].counter + 1 });
+
+                if (e.search.cursor < meta.len - 1) {
+                    e.search.cursor += 1;
+                } else {
+                    e.search.cursor = 0;
+                }
+            },
+
+            asKey('N') => if (e.search.meta) |meta| {
+                e.cursor.y = meta[e.search.cursor].line;
+                e.cursor.x = meta[e.search.cursor].start;
+                try e.prompt.setStatusMsg("[{}/{}]", .{ meta[e.search.cursor].counter + 1, meta[meta.len - 1].counter + 1 });
+
+                if (e.search.cursor != 0) {
+                    e.search.cursor -= 1;
+                } else {
+                    e.search.cursor = meta.len - 1;
+                }
+            },
+
             asKey('i') => e.mode = .insert,
 
             asKey('v') => e.mode = .visual,
 
             asKey(':') => e.mode = .command,
+
+            asKey('/') => {
+                e.mode = .command;
+                // implement captureSearch()
+            },
 
             asKey('C'), asKey('S'), asKey('D') => |c| {
                 // TODO

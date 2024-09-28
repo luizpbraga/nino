@@ -59,6 +59,7 @@ fn screenY(p: *Prompt) usize {
 }
 
 var DRAW = true;
+/// TODO: REFECTOR
 pub fn draw(p: *Prompt) !void {
     if (DRAW) {
         const msg = p.status.msg;

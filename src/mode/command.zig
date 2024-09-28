@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = @import("../io.zig");
 const Editor = @import("../Editor.zig");
+const Regex = @import("../Regex.zig");
 
 const mem = std.mem;
 const eql = mem.eql;
@@ -35,6 +36,27 @@ pub fn actions(e: *Editor) !bool {
         return false;
     };
     const cmd = trim(u8, command, " \t\r\n");
+
+    if (startsWith(u8, cmd, "/")) {
+        const patterns = cmd[1..];
+
+        try e.search.compile(patterns);
+
+        // const counter = try e.search.applySearchRows(e.row, patterns);
+        // const counter = ;
+        // if (counter == 0) {
+        //     try e.prompt.setStatusMsg("\x1b[31mError: Pattern not found: {s}\x1b[0m", .{patterns});
+        // } else {
+        //     try e.prompt.setStatusMsg(":/{s} [{}]", .{ patterns, counter });
+        // }
+        return false;
+    }
+
+    if (eql(u8, cmd, "nos")) {
+        // e.search.free();
+        e.search.undo(e.row);
+        return false;
+    }
 
     if (eql(u8, cmd, "n")) {
         try e.prompt.setStatusMsg("nrows:{}", .{e.numOfRows()});
@@ -74,7 +96,7 @@ pub fn actions(e: *Editor) !bool {
             try io.exit();
             return true;
         }
-        try e.prompt.setStatusMsg("Warn: unsaved changes. Use ':q!' to force quit", .{});
+        try e.prompt.setStatusMsg("Warning: unsaved changes. Use ':q!' to force quit", .{});
         return false;
     }
 
@@ -90,7 +112,7 @@ pub fn actions(e: *Editor) !bool {
         }
 
         if (e.file_status == 0) {
-            try e.prompt.setStatusMsg("Warn: Nothing to write", .{});
+            try e.prompt.setStatusMsg("Warning: Nothing to write", .{});
             return false;
         }
 

@@ -15,6 +15,7 @@ const readKey = io.readKey;
 const asKey = keys.asKey;
 const Visual = visual.Visual;
 const Highlight = @import("Highlight.zig");
+const Regex = @import("Regex.zig");
 
 /// deals with low-level terminal input and mapping
 const Editor = @This();
@@ -23,7 +24,7 @@ const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
 
 pub var SETLIGHT = true;
 pub var LEFTSPACE: usize = 0;
-pub var SETNUMBER = true;
+pub var SETNUMBER = !true;
 pub var TABSTOP: usize = 4;
 pub var STATUSBAR: usize = 2;
 pub var DEFAULT_STATUS_SIZE: usize = 2;
@@ -32,6 +33,7 @@ pub var ALLOCNAME = false;
 pub var SETMOUSE = false;
 pub var MOUSECOORD: Coordinate = .{};
 pub var INBLOCKMODE = false;
+pub var SEARCH = false;
 
 const Config = struct {
     mouse: bool = false,
@@ -70,10 +72,12 @@ file_status: usize = 0,
 mode: Mode = .normal,
 /// remapping
 keyremap: KeyMap,
-/// menssages and commands
+/// messages and commands
 prompt: Prompt,
-///
+/// Highlight config
 hl: ?Highlight = null,
+/// search
+search: Regex,
 /// Read the current terminal attributes into raw
 /// and save the terminal state
 pub fn init(alloc: std.mem.Allocator) !Editor {
@@ -90,6 +94,7 @@ pub fn init(alloc: std.mem.Allocator) !Editor {
         .prompt = .init(alloc),
         .keyremap = .init(alloc),
         .orig_termios = orig_termios,
+        .search = try .init(alloc),
     };
 
     try e.getWindowSize();
@@ -117,6 +122,7 @@ pub fn deinit(e: *Editor) void {
     if (ALLOCNAME) e.alloc.free(e.file_name);
     e.prompt.deinit();
     if (e.hl) |*hl| hl.deinit(e.alloc);
+    e.search.deinit();
 }
 
 pub fn processKeyPressed(e: *Editor) !bool {
@@ -212,11 +218,17 @@ pub fn refreshScreen(e: *Editor) !void {
     defer e.buffer.clearAndFree();
 
     e.scroll();
+
     // TODO: put this in another way
     if (SETNUMBER) LEFTSPACE = std.fmt.count(" {} ", .{e.editorSize() + e.offset.y});
+
     try e.drawRows();
+
+    // separate status bar from Editor
     try e.drawStatusBar();
+
     try e.prompt.draw();
+
     try e.buffer.writer().print("\x1b[{};{}H", .{
         e.cursor.y - e.offset.y + 1,
         LEFTSPACE + e.cursor.rx - e.offset.x + 1,
@@ -240,7 +252,7 @@ fn editorSize(e: *Editor) usize {
     return e.screen.y - STATUSBAR;
 }
 
-pub fn drawWellcomeScreen(e: *Editor) !void {
+pub fn drawWelcomeScreen(e: *Editor) !void {
     const welllen = WELLCOME_STRING.len;
     var pedding = (e.screen.x - welllen) / 2;
 
@@ -260,7 +272,7 @@ pub fn drawStatusBar(e: *Editor) !void {
     // switch colors
     try e.buffer.appendSlice("\x1b[7m");
 
-    // ugly peace of shit!!!
+    // FIX: ugly peace of shit!!!
     const page_percent = b: {
         const yf: f64 = @floatFromInt(e.cursor.y);
         const nr: f64 = @floatFromInt(e.numOfRows());
@@ -290,7 +302,7 @@ pub fn drawStatusBar(e: *Editor) !void {
     try e.buffer.appendNTimes(' ', spaces);
     try e.buffer.appendSlice(rstatus[0..rlen]);
 
-    // reswitch colors
+    // re-switch colors
     try e.buffer.appendSlice("\x1b[0m");
 }
 
@@ -299,23 +311,26 @@ pub fn drawStatusBar(e: *Editor) !void {
 /// TODO: Clear lines one at a time
 pub fn drawRows(e: *Editor) !void {
     try e.buffer.appendSlice("\x1b[H");
-    const b1 = e.buffer.items.len;
-    _ = b1; // autofix
     const screenY = e.editorSize();
     for (0..screenY) |y| {
         const file_row = y + e.offset.y;
 
         if (file_row >= e.numOfRows()) {
-            // prints the WELLCOME_STRING if where is no input file
+            // prints the WELCOME_STRING if where is no input file
             if (e.numOfRows() == 0 and y == screenY / 3) {
-                try e.drawWellcomeScreen();
+                try e.drawWelcomeScreen();
             } else {
                 try e.buffer.append('~');
             }
         } else {
             const renders = e.row.items[file_row].render.items;
             var len = std.math.sub(usize, renders.len, e.offset.x) catch 0;
-            if (len > e.screen.x - LEFTSPACE) len = e.screen.x - LEFTSPACE;
+
+            // this fix searching
+            const a = std.mem.count(u8, renders, "\x1b[7m");
+            const b = std.mem.count(u8, renders, "\x1b[0m");
+            const sx = e.screen.x + a * 4 + b * 4;
+            if (len > sx - LEFTSPACE) len = sx - LEFTSPACE;
 
             // TODO: relative numbers
             if (SETNUMBER) {
@@ -327,27 +342,34 @@ pub fn drawRows(e: *Editor) !void {
             }
 
             // I KNOW I CAN DO BETTER, OK?!
-            if (e.mode == .visual) {
-                const x = e.screen.x - LEFTSPACE + 8;
-                var i: usize = 0;
-                while (i < x) : (i += 1) {
-                    if (e.offset.x + i == renders.len) {
-                        break;
-                    }
-                    try e.buffer.append(renders[e.offset.x + i]);
-                }
+            // if (e.mode == .visual) {
+            //     const x = e.screen.x - LEFTSPACE + 8;
+            //     var i: usize = 0;
+            //     while (i < x) : (i += 1) {
+            //         if (e.offset.x + i == renders.len) {
+            //             break;
+            //         }
+            //         try e.buffer.append(renders[e.offset.x + i]);
+            //     }
+            // } else {
+
+            // apply search colors
+            if (e.search.patterns != null) {
+                try e.search.highlight(&e.buffer);
+            }
+
+            // apply highlight colors
+            if (e.hl) |*hl| {
+                var list = try e.alloc.allocSentinel(u8, len, 0);
+                defer e.alloc.free(list);
+                for (0..len) |i| list[i] = renders[e.offset.x + i];
+                try hl.illuminate(&e.buffer, list);
             } else {
-                if (e.hl) |*hl| {
-                    var list = try e.alloc.allocSentinel(u8, len, 0);
-                    defer e.alloc.free(list);
-                    for (0..len) |i| list[i] = renders[e.offset.x + i];
-                    try hl.illuminate(&e.buffer, list);
-                } else {
-                    for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
-                }
+                for (0..len) |i| try e.buffer.append(renders[e.offset.x + i]);
             }
         }
 
+        // try e.search.applySearch(&e.buffer);
         // clear each line as we redraw them
         try e.buffer.appendSlice("\x1b[K\r\n");
     }
@@ -489,7 +511,7 @@ pub fn deleteChar(e: *Editor) !void {
         return;
     }
 
-    // handle appending to the prev. line
+    // handle appending to the previews line
     const last_row = e.rowAt(e.cursor.y - 1);
     e.cursor.x = last_row.charsLen();
     try e.rowAppendString(last_row, row.chars.items);

@@ -37,11 +37,17 @@ pub fn init(alloc: std.mem.Allocator) !Regex {
 }
 
 pub fn compile(re: *Regex, patterns: []const u8) !void {
+    if (re.patterns != null) {
+        re.free();
+    }
+
     const patter = try re.alloc.dupeZ(u8, patterns);
     defer re.alloc.free(patter);
+
     if (c.regcomp(re.regex, patter.ptr, c.REG_EXTENDED) != 0) {
         return error.SomeShitIsNotOk;
     }
+
     re.patterns = patterns;
 }
 
@@ -51,7 +57,12 @@ pub fn free(re: *Regex) void {
 }
 
 pub fn deinit(re: *Regex) void {
+    if (re.patterns != null) {
+        re.free();
+    }
+
     if (re.meta) |meta| re.alloc.free(meta);
+
     re.alloc.free(re.slice);
 }
 
@@ -60,7 +71,6 @@ pub fn applySearch(re: *Regex, code: *std.ArrayList(u8)) !void {
 
     if (code.items.len == 0) return;
 
-    // const len = code.items.len;
     try code.append(0);
 
     var matches: [1]c.regmatch_t = undefined;
@@ -75,11 +85,6 @@ pub fn applySearch(re: *Regex, code: *std.ArrayList(u8)) !void {
     }
 
     _ = code.pop();
-
-    // if (len == code.items.len and len != 0) {
-    //     re.patterns = null;
-    //     return error.NoMatch;
-    // }
 }
 
 pub fn applySearchRows(re: *Regex, rows: anytype, patterns: []const u8) !usize {

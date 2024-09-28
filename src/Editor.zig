@@ -20,7 +20,7 @@ const Regex = @import("Regex.zig");
 /// deals with low-level terminal input and mapping
 const Editor = @This();
 const VERSION = "0.0.3";
-const WELLCOME_STRING = "NINO editor -- version " ++ VERSION;
+const WELCOME_STRING = "NINO editor -- version " ++ VERSION;
 
 pub var SETLIGHT = true;
 pub var LEFTSPACE: usize = 0;
@@ -253,8 +253,8 @@ fn editorSize(e: *Editor) usize {
 }
 
 pub fn drawWelcomeScreen(e: *Editor) !void {
-    const welllen = WELLCOME_STRING.len;
-    var pedding = (e.screen.x - welllen) / 2;
+    const wellen = WELCOME_STRING.len;
+    var pedding = (e.screen.x - wellen) / 2;
 
     if (pedding > 0) {
         try e.buffer.append('~');
@@ -265,7 +265,7 @@ pub fn drawWelcomeScreen(e: *Editor) !void {
         try e.buffer.append(' ');
     }
 
-    try e.buffer.appendSlice(WELLCOME_STRING);
+    try e.buffer.appendSlice(WELCOME_STRING);
 }
 
 pub fn drawStatusBar(e: *Editor) !void {
@@ -332,15 +332,7 @@ pub fn drawRows(e: *Editor) !void {
             const sx = e.screen.x + a * 4 + b * 4;
             if (len > sx - LEFTSPACE) len = sx - LEFTSPACE;
 
-            // TODO: relative numbers
-            if (SETNUMBER) {
-                var size = e.buffer.items.len;
-                try e.buffer.writer().print(" \x1b[90m{}\x1b[0m ", .{file_row});
-                const escape_size = 9;
-                size = e.buffer.items.len - size - escape_size;
-                if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
-            }
-
+            // VISUAL MODE
             // I KNOW I CAN DO BETTER, OK?!
             // if (e.mode == .visual) {
             //     const x = e.screen.x - LEFTSPACE + 8;
@@ -358,7 +350,16 @@ pub fn drawRows(e: *Editor) !void {
                 try e.search.highlight(&e.buffer);
             }
 
-            // apply highlight colors
+            // TODO: relative numbers
+            if (SETNUMBER) {
+                var size = e.buffer.items.len;
+                try e.buffer.writer().print(" \x1b[90m{}\x1b[0m ", .{file_row});
+                const escape_size = 9;
+                size = e.buffer.items.len - size - escape_size;
+                if (size < LEFTSPACE) try e.buffer.appendNTimes(' ', LEFTSPACE - size);
+            }
+
+            // apply highlight colors if possible
             if (e.hl) |*hl| {
                 var list = try e.alloc.allocSentinel(u8, len, 0);
                 defer e.alloc.free(list);
